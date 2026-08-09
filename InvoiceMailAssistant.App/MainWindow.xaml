@@ -1,0 +1,124 @@
+<Window x:Class="InvoiceMailAssistant.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="开票邮件助手" Height="680" Width="1040" MinHeight="600" MinWidth="900"
+        Background="{StaticResource CanvasBrush}" FontFamily="Segoe UI Variable, Microsoft YaHei UI">
+    <Grid>
+        <Grid.RowDefinitions><RowDefinition Height="56"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <Border Grid.Row="0" Background="White" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
+            <Grid Margin="20,0">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="开票邮件助手" FontSize="17" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
+                    <Border Margin="12,0,0,0" Padding="7,3" CornerRadius="8" Background="#EEF2FF"><TextBlock Text="{Binding ConnectionText}" FontSize="11" Foreground="#315EFB"/></Border>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Content="{Binding ListeningButtonText}" Command="{Binding ToggleListeningCommand}"/>
+                    <Button Content="立即检查" Command="{Binding CheckNowCommand}" Background="{StaticResource AccentBrush}" Foreground="White" BorderThickness="0"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <TabControl Grid.Row="1" TabStripPlacement="Left" Background="{StaticResource CanvasBrush}" BorderThickness="0">
+            <TabControl.Resources>
+                <Style TargetType="TabItem">
+                    <Setter Property="Width" Value="164"/>
+                    <Setter Property="Height" Value="42"/>
+                    <Setter Property="HorizontalContentAlignment" Value="Left"/>
+                    <Setter Property="Padding" Value="18,0"/>
+                    <Setter Property="FontSize" Value="13"/>
+                    <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="TabItem">
+                                <Border x:Name="TabChrome" Background="Transparent" BorderBrush="Transparent" BorderThickness="0" CornerRadius="6" Margin="8,3,8,3" Padding="{TemplateBinding Padding}">
+                                    <ContentPresenter ContentSource="Header" VerticalAlignment="Center"/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="TabChrome" Property="Background" Value="#F0F3F8"/></Trigger>
+                                    <Trigger Property="IsSelected" Value="True"><Setter TargetName="TabChrome" Property="Background" Value="#EAF0FF"/><Setter Property="Foreground" Value="{StaticResource AccentBrush}"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+            </TabControl.Resources>
+            <TabItem Header="概览">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="28,24,28,32">
+                        <TextBlock Text="概览" FontSize="24" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
+                        <TextBlock Text="邮件识别、去重与 Excel 写入状态" Margin="0,4,0,0" FontSize="13" Foreground="{StaticResource MutedBrush}"/>
+                        <Border Margin="0,22,0,0" Padding="16" Background="White" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                <StackPanel><TextBlock Text="邮箱" Foreground="{StaticResource MutedBrush}" FontSize="12"/><TextBlock Text="{Binding ConnectionText}" FontWeight="SemiBold" Margin="0,3,0,0"/></StackPanel>
+                                <StackPanel Grid.Column="1"><TextBlock Text="最后检查" Foreground="{StaticResource MutedBrush}" FontSize="12"/><TextBlock Text="{Binding LastCheckedText}" FontWeight="SemiBold" Margin="0,3,0,0"/></StackPanel>
+                                <StackPanel Grid.Column="2"><TextBlock Text="状态" Foreground="{StaticResource MutedBrush}" FontSize="12"/><TextBlock Text="{Binding StatusText}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/></StackPanel>
+                            </Grid>
+                        </Border>
+                        <Grid Margin="0,20,0,0">
+                            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                            <StackPanel><TextBlock Text="今日收到" Foreground="{StaticResource MutedBrush}"/><TextBlock Text="{Binding TodayReceived}" FontSize="28" FontWeight="SemiBold"/></StackPanel>
+                            <StackPanel Grid.Column="1"><TextBlock Text="今日录入" Foreground="{StaticResource MutedBrush}"/><TextBlock Text="{Binding TodayCompleted}" FontSize="28" FontWeight="SemiBold"/></StackPanel>
+                            <StackPanel Grid.Column="2"><TextBlock Text="等待写入" Foreground="{StaticResource MutedBrush}"/><TextBlock Text="{Binding PendingCount}" FontSize="28" FontWeight="SemiBold"/></StackPanel>
+                            <StackPanel Grid.Column="3"><TextBlock Text="失败" Foreground="{StaticResource MutedBrush}"/><TextBlock Text="{Binding FailedCount}" FontSize="28" FontWeight="SemiBold"/></StackPanel>
+                        </Grid>
+                        <Grid Margin="0,28,0,10"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="最近处理" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/><Button Grid.Column="1" Content="重试等待项" Command="{Binding RetryPendingCommand}"/></Grid>
+                        <DataGrid ItemsSource="{Binding Records}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" HeadersVisibility="Column" GridLinesVisibility="Horizontal" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" RowBackground="White" AlternatingRowBackground="#FAFBFC" MinHeight="260">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="申请时间" Binding="{Binding ApplyTime, StringFormat={}{0:yyyy-MM-dd HH:mm}}" Width="145"/>
+                                <DataGridTextColumn Header="企业名称" Binding="{Binding CompanyName}" Width="*"/>
+                                <DataGridTextColumn Header="信用代码" Binding="{Binding CreditCode}" Width="170"/>
+                                <DataGridTextColumn Header="金额" Binding="{Binding Amount, StringFormat={}{0:F2}}" Width="90"/>
+                                <DataGridTextColumn Header="状态" Binding="{Binding ProcessingStatus}" Width="100"/>
+                                <DataGridTextColumn Header="Excel 行" Binding="{Binding ExcelRow}" Width="80"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+            <TabItem Header="处理记录">
+                <Grid Margin="28,24,28,28">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="12"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                    <StackPanel><TextBlock Text="处理记录" FontSize="24" FontWeight="SemiBold"/><TextBlock Text="数据库中最近 200 条开票申请" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0"/></StackPanel>
+                    <DataGrid Grid.Row="2" ItemsSource="{Binding Records}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="申请时间" Binding="{Binding ApplyTime, StringFormat={}{0:yyyy-MM-dd HH:mm}}" Width="145"/><DataGridTextColumn Header="企业名称" Binding="{Binding CompanyName}" Width="*"/><DataGridTextColumn Header="信用代码" Binding="{Binding CreditCode}" Width="165"/><DataGridTextColumn Header="金额" Binding="{Binding Amount, StringFormat={}{0:F2}}" Width="90"/><DataGridTextColumn Header="邮箱" Binding="{Binding Email}" Width="190"/><DataGridTextColumn Header="状态" Binding="{Binding ProcessingStatus}" Width="100"/><DataGridTextColumn Header="行" Binding="{Binding ExcelRow}" Width="60"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
+            <TabItem Header="等待处理">
+                <StackPanel Margin="28,24,28,28"><TextBlock Text="等待处理" FontSize="24" FontWeight="SemiBold"/><TextBlock Text="Excel 被占用或暂时写入失败的记录会保存在 SQLite 中。关闭占用登记表的 Excel 后，可立即重试。" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,18"/><StackPanel Orientation="Horizontal"><Button Content="立即重试全部" Command="{Binding RetryPendingCommand}"/></StackPanel><TextBlock Text="当前等待数量" Margin="0,22,0,4" Foreground="{StaticResource MutedBrush}"/><TextBlock Text="{Binding PendingCount}" FontSize="32" FontWeight="SemiBold"/></StackPanel>
+            </TabItem>
+            <TabItem Header="设置">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="28,24,28,32" MaxWidth="760" HorizontalAlignment="Left">
+                        <TextBlock Text="设置" FontSize="24" FontWeight="SemiBold"/>
+                        <TextBlock Text="登录凭据仅保存在当前 Windows 用户的受保护本地存储中。" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,22"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="350"/><ColumnDefinition Width="24"/><ColumnDefinition Width="350"/></Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="邮箱账户"/><TextBox Text="{Binding EmailAccount, UpdateSourceTrigger=PropertyChanged}"/>
+                                <TextBlock Text="邮箱登录凭据"/><PasswordBox x:Name="CredentialInput"/>
+                                <TextBlock Text="IMAP 地址"/><TextBox Text="{Binding ImapHost, UpdateSourceTrigger=PropertyChanged}"/>
+                                <TextBlock Text="IMAP 端口"/><TextBox Text="{Binding ImapPort, UpdateSourceTrigger=PropertyChanged}"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="Excel 文件"/>
+                                <Grid Margin="0,4,0,10">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <TextBox Text="{Binding ExcelPath}" IsReadOnly="True" Margin="0" ToolTip="请点击“选择 Excel…”选择开票登记表文件"/>
+                                    <Button Grid.Column="1" Content="选择 Excel…" Click="ChooseExcel_Click" Margin="8,0,0,0" Padding="10,6"/>
+                                </Grid>
+                                <TextBlock Text="工作表名称"/><TextBox Text="{Binding WorksheetName, UpdateSourceTrigger=PropertyChanged}"/>
+                                <TextBlock Text="检查间隔（秒，30–300）"/><TextBox Text="{Binding PollSeconds, UpdateSourceTrigger=PropertyChanged}"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,12,0,0"><Button Content="保存设置" Command="{Binding SaveSettingsCommand}" Background="{StaticResource AccentBrush}" Foreground="White" BorderThickness="0"/><Button Content="测试连接" Command="{Binding TestConnectionCommand}"/></StackPanel>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+    </Grid>
+</Window>
