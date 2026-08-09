@@ -302,7 +302,7 @@ public sealed class SqliteInvoiceRepository(string databasePath)
     {
         await using var connection = await OpenConnectionAsync(cancellationToken);
         var command = connection.CreateCommand();
-        command.CommandText = "SELECT 1 FROM invoice_applications WHERE (message_id <> '' AND message_id = $messageId AND mailbox_identity = $mailbox) OR (mailbox_identity = $mailbox AND mailbox_name = $mailboxName AND uid_validity = $uidValidity AND imap_uid = $uid) OR (mailbox_identity = $mailbox AND (fallback_hash = $hash OR ($legacyHash IS NOT NULL AND fallback_hash = $legacyHash))) LIMIT 1;";
+        command.CommandText = "SELECT 1 FROM invoice_applications WHERE (message_id <> '' AND message_id = $messageId AND (mailbox_identity = $mailbox OR mailbox_identity = '')) OR ((mailbox_identity = $mailbox OR mailbox_identity = '') AND mailbox_name = $mailboxName AND uid_validity = $uidValidity AND imap_uid = $uid) OR ((mailbox_identity = $mailbox OR mailbox_identity = '') AND (fallback_hash = $hash OR ($legacyHash IS NOT NULL AND fallback_hash = $legacyHash))) LIMIT 1;";
         command.Parameters.AddWithValue("$messageId", messageId);
         command.Parameters.AddWithValue("$mailbox", mailboxIdentity);
         command.Parameters.AddWithValue("$mailboxName", mailboxName);

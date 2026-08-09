@@ -54,7 +54,7 @@ dotnet test .\InvoiceMailAssistant.Tests\InvoiceMailAssistant.Tests.csproj -c Re
 
 ## 当前验证状态
 
-已使用 Windows 原生 .NET SDK 执行验证：根目录解决方案可执行 `dotnet restore`，App 的 Release build 成功（0 个错误、0 个警告）；未配置真实工作簿时测试为 30 通过、1 跳过，配置隔离副本后为 31 通过、0 跳过。
+已使用 Windows 原生 .NET SDK 执行验证：根目录解决方案可执行 `dotnet restore`，App 的 Release build 成功（0 个错误、0 个警告）；未配置真实工作簿时测试为 31 通过、1 跳过，配置隔离副本后为 32 通过、0 跳过。
 
 自动测试覆盖 parser、金额/HTML/mailto、SQLite 并发 UNIQUE 去重、UIDVALIDITY、MonitorFromUtc 边界、邮箱重连退避、200+ 积压、严格发件人、Excel E/G/H 保留、计划行恢复、已写行幂等、人工占用/插行重规划、跨年日期，以及真实工作簿的工作表集合、公式、列宽、合并单元格、冻结窗格、打印设置和原有人工列内容。
 
