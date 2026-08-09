@@ -145,6 +145,27 @@ public sealed class RepositoryTests
         }
     }
 
+    [Fact]
+    public async Task LegacyRowsWithoutMailboxIdentityStillPreventUpgradeDuplicates()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"invoice-mail-{Guid.NewGuid():N}.db");
+        try
+        {
+            var repository = new SqliteInvoiceRepository(path);
+            await repository.InitializeAsync();
+            var legacy = CreateApplication("legacy-message", 60, 9, mailbox: string.Empty);
+            var upgraded = CreateApplication("legacy-message", 99, 10, mailbox: "account@example.com");
+
+            Assert.NotNull(await repository.TryInsertAsync(legacy, Deduplication.CreateFallbackHash(legacy)));
+            Assert.Null(await repository.TryInsertAsync(upgraded, Deduplication.CreateFallbackHash(upgraded)));
+            Assert.Single(await repository.GetRecentAsync(10));
+        }
+        finally
+        {
+            DeleteDatabase(path);
+        }
+    }
+
     private static InvoiceApplication CreateApplication(string messageId, uint uid, uint uidValidity, string mailbox = "account@example.com", string body = "body")
         => new()
         {
