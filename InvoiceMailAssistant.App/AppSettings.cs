@@ -12,6 +12,7 @@ public sealed class AppSettings
     public string ExcelPath { get; set; } = string.Empty;
     public string WorksheetName { get; set; } = "中外运";
     public int PollSeconds { get; set; } = 60;
+    public bool RunAtStartup { get; set; }
     public string MailboxIdentity { get; set; } = string.Empty;
     public DateTimeOffset? MonitorFromUtc { get; set; }
 
@@ -41,7 +42,8 @@ public sealed class AppSettings
                 stream.Flush(true);
             }
 
-            File.Move(tempPath, path, true);
+            if (File.Exists(path)) File.Replace(tempPath, path, null, true);
+            else File.Move(tempPath, path);
         }
         finally
         {

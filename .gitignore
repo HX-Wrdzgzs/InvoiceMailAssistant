@@ -10,3 +10,5 @@ settings.json
 *.xlsx
 *.xlsm
 *.tmp.xlsx
+dist/
+publish/

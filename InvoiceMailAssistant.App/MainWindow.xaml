@@ -80,7 +80,7 @@
             <TabItem Header="处理记录">
                 <Grid Margin="28,24,28,28">
                     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="12"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                    <StackPanel><TextBlock Text="处理记录" FontSize="24" FontWeight="SemiBold"/><TextBlock Text="数据库中最近 200 条开票申请" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0"/></StackPanel>
+                    <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="处理记录" FontSize="24" FontWeight="SemiBold"/><TextBlock Text="数据库中最近 200 条开票申请" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0"/></StackPanel><Button Grid.Column="1" Content="重新解析失败记录" Command="{Binding ReparseFailedCommand}"/></Grid>
                     <DataGrid Grid.Row="2" ItemsSource="{Binding Records}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="申请时间" Binding="{Binding ApplyTime, StringFormat={}{0:yyyy-MM-dd HH:mm}}" Width="145"/><DataGridTextColumn Header="企业名称" Binding="{Binding CompanyName}" Width="*"/><DataGridTextColumn Header="信用代码" Binding="{Binding CreditCode}" Width="165"/><DataGridTextColumn Header="金额" Binding="{Binding Amount, StringFormat={}{0:F2}}" Width="90"/><DataGridTextColumn Header="邮箱" Binding="{Binding Email}" Width="190"/><DataGridTextColumn Header="状态" Binding="{Binding ProcessingStatus}" Width="100"/><DataGridTextColumn Header="行" Binding="{Binding ExcelRow}" Width="60"/>
@@ -89,7 +89,14 @@
                 </Grid>
             </TabItem>
             <TabItem Header="等待处理">
-                <StackPanel Margin="28,24,28,28"><TextBlock Text="等待处理" FontSize="24" FontWeight="SemiBold"/><TextBlock Text="Excel 被占用或暂时写入失败的记录会保存在 SQLite 中。关闭占用登记表的 Excel 后，可立即重试。" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,18"/><StackPanel Orientation="Horizontal"><Button Content="立即重试全部" Command="{Binding RetryPendingCommand}"/></StackPanel><TextBlock Text="当前等待数量" Margin="0,22,0,4" Foreground="{StaticResource MutedBrush}"/><TextBlock Text="{Binding PendingCount}" FontSize="32" FontWeight="SemiBold"/></StackPanel>
+                <Grid Margin="28,24,28,28">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="12"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                    <TextBlock Text="等待处理" FontSize="24" FontWeight="SemiBold"/>
+                    <Grid Grid.Row="1" Margin="0,6,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="Excel 被占用或暂时写入失败的记录会保存在 SQLite 中。关闭占用登记表的 Excel 后，可立即重试。" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"/><Button Grid.Column="1" Content="立即重试全部" Command="{Binding RetryPendingCommand}" Margin="12,0,0,0"/></Grid>
+                    <DataGrid Grid.Row="3" ItemsSource="{Binding PendingRecords}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White">
+                        <DataGrid.Columns><DataGridTextColumn Header="申请时间" Binding="{Binding ApplyTime, StringFormat={}{0:yyyy-MM-dd HH:mm}}" Width="145"/><DataGridTextColumn Header="企业名称" Binding="{Binding CompanyName}" Width="*"/><DataGridTextColumn Header="金额" Binding="{Binding Amount, StringFormat={}{0:F2}}" Width="90"/><DataGridTextColumn Header="状态" Binding="{Binding ProcessingStatus}" Width="110"/><DataGridTextColumn Header="错误" Binding="{Binding ErrorMessage}" Width="2*"/></DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
             </TabItem>
             <TabItem Header="设置">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -113,6 +120,9 @@
                                 </Grid>
                                 <TextBlock Text="工作表名称"/><TextBox Text="{Binding WorksheetName, UpdateSourceTrigger=PropertyChanged}"/>
                                 <TextBlock Text="检查间隔（秒，30–300）"/><TextBox Text="{Binding PollSeconds, UpdateSourceTrigger=PropertyChanged}"/>
+                                <CheckBox Content="随 Windows 启动" IsChecked="{Binding RunAtStartup}" Margin="0,10,0,0"/>
+                                <TextBlock Text="历史补扫" Margin="0,16,0,4"/>
+                                <StackPanel Orientation="Horizontal"><Button Content="补扫 7 天" Command="{Binding Scan7DaysCommand}"/><Button Content="补扫 30 天" Command="{Binding Scan30DaysCommand}" Margin="8,0,0,0"/><TextBox Text="{Binding CustomHistoryDays, UpdateSourceTrigger=PropertyChanged}" Width="56" Margin="8,0,0,0"/><Button Content="补扫" Command="{Binding ScanCustomCommand}" Margin="8,0,0,0"/></StackPanel>
                                 <StackPanel Orientation="Horizontal" Margin="0,12,0,0"><Button Content="保存设置" Command="{Binding SaveSettingsCommand}" Background="{StaticResource AccentBrush}" Foreground="White" BorderThickness="0"/><Button Content="测试连接" Command="{Binding TestConnectionCommand}"/></StackPanel>
                             </StackPanel>
                         </Grid>
