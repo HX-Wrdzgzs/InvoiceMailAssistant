@@ -262,7 +262,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         StatusText = $"正在补扫最近 {days} 天邮件";
         await CheckNowAsync(false, DateTimeOffset.UtcNow.AddDays(-days));
-        StatusText = $"历史补扫完成：最近 {days} 天";
+        if (StatusText.StartsWith("检查完成", StringComparison.Ordinal))
+            StatusText = $"历史补扫完成：最近 {days} 天";
+        else if (StatusText.StartsWith("正在补扫", StringComparison.Ordinal))
+            StatusText = "历史补扫未执行：当前已有检查任务在运行";
     }
 
     private async Task ReparseFailedAsync()
