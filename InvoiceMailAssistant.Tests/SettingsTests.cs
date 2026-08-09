@@ -45,4 +45,24 @@ public sealed class SettingsTests
             if (Directory.Exists(directory)) Directory.Delete(directory, true);
         }
     }
+
+    [Fact]
+    public async Task DpapiCredentialRoundTripCanDeleteOldAccount()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"invoice-mail-credentials-{Guid.NewGuid():N}");
+        try
+        {
+            var store = new DpapiCredentialStore(directory);
+            await store.SaveAsync("old@example.com", "client-password");
+            Assert.Equal("client-password", await store.LoadAsync("old@example.com"));
+
+            await store.DeleteAsync("old@example.com");
+
+            Assert.Null(await store.LoadAsync("old@example.com"));
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        }
+    }
 }

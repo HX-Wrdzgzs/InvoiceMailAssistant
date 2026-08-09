@@ -1,83 +1,255 @@
 using System.IO;
 using System.IO.Compression;
+using System.Net.Sockets;
 using System.Security.Cryptography;
+using System.Security;
 using System.Text;
 using System.Xml.Linq;
 using ClosedXML.Excel;
 using MailKit;
 using MailKit.Net.Imap;
 using MailKit.Search;
+using MailKit.Security;
 using Microsoft.Data.Sqlite;
+using Microsoft.Win32;
 
 namespace InvoiceMailAssistant.App;
 
-public sealed class MailboxService
+public sealed class MailboxService : IDisposable
 {
     private const string Sender = "sino-esign@sinotrans.com";
     private const string SubjectPrefix = "中外运向您提交了开票申请";
+    private readonly IMailboxSessionFactory _sessionFactory;
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private IMailboxSession? _session;
+    private string? _connectionKey;
+    private DateTimeOffset _retryAfterUtc;
+    private int _failureCount;
+
+    public MailboxService(IMailboxSessionFactory? sessionFactory = null)
+        => _sessionFactory = sessionFactory ?? new MailKitMailboxSessionFactory();
 
     public async Task TestConnectionAsync(string account, string password, string host, int port, CancellationToken cancellationToken)
     {
-        using var client = new ImapClient();
-        await client.ConnectAsync(host, port, true, cancellationToken);
-        await client.AuthenticateAsync(account, password, cancellationToken);
-        await client.DisconnectAsync(true, cancellationToken);
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            _retryAfterUtc = DateTimeOffset.MinValue;
+            await DisconnectCoreAsync();
+            await ConnectCoreAsync(account, password, host, port, cancellationToken);
+        }
+        catch (Exception ex) when (IsTransient(ex))
+        {
+            await DisconnectCoreAsync();
+            RegisterFailure();
+            throw;
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     public async Task<IReadOnlyList<MailEnvelope>> FetchCandidateMessagesAsync(string account, string password, string host, int port, DateTimeOffset monitorFromUtc, int maxMessages, CancellationToken cancellationToken)
     {
-        using var client = new ImapClient();
-        await client.ConnectAsync(host, port, true, cancellationToken);
-        await client.AuthenticateAsync(account, password, cancellationToken);
+        _ = maxMessages; // Kept for source compatibility; the search is intentionally not capped.
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            await EnsureConnectedAsync(account, password, host, port, cancellationToken);
+            var messages = await _session!.FetchCandidateMessagesAsync(monitorFromUtc, cancellationToken);
+            var result = new List<MailEnvelope>(messages.Count);
+            foreach (var message in messages)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (message.InternalDate < monitorFromUtc && string.IsNullOrWhiteSpace(message.FetchError))
+                    continue;
+                var fromAddresses = message.FromAddresses
+                    .Select(x => x.Trim().ToLowerInvariant())
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .ToArray();
+                var from = fromAddresses.Length == 1 ? fromAddresses[0] : string.Empty;
+                var subject = message.Subject.Trim();
+                var matches = string.Equals(from, Sender, StringComparison.OrdinalIgnoreCase)
+                    && subject.StartsWith(SubjectPrefix, StringComparison.Ordinal);
+                if (!matches && string.IsNullOrWhiteSpace(message.FetchError)) continue;
+
+                result.Add(new MailEnvelope(
+                    message.Uid,
+                    message.MessageId,
+                    from,
+                    subject,
+                    message.InternalDate,
+                    message.BodyText,
+                    message.UidValidity,
+                    message.MailboxName,
+                    message.FetchError));
+            }
+
+            _failureCount = 0;
+            _retryAfterUtc = DateTimeOffset.MinValue;
+            return result;
+        }
+        catch (Exception ex) when (IsTransient(ex))
+        {
+            await DisconnectCoreAsync();
+            RegisterFailure();
+            throw;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private async Task EnsureConnectedAsync(string account, string password, string host, int port, CancellationToken cancellationToken)
+    {
+        var key = $"{account.Trim().ToLowerInvariant()}|{host.Trim().ToLowerInvariant()}|{port}";
+        if (_session?.IsConnected == true && string.Equals(_connectionKey, key, StringComparison.Ordinal))
+            return;
+
+        if (_retryAfterUtc > DateTimeOffset.UtcNow)
+            throw new MailboxBackoffException($"邮箱连接失败，正在退避重试（下次重试时间：{_retryAfterUtc.ToLocalTime():HH:mm:ss}）。");
+
+        await DisconnectCoreAsync();
+        await ConnectCoreAsync(account, password, host, port, cancellationToken);
+    }
+
+    private async Task ConnectCoreAsync(string account, string password, string host, int port, CancellationToken cancellationToken)
+    {
+        var session = await _sessionFactory.ConnectAsync(account, password, host, port, cancellationToken);
+        _session = session;
+        _connectionKey = $"{account.Trim().ToLowerInvariant()}|{host.Trim().ToLowerInvariant()}|{port}";
+        _failureCount = 0;
+        _retryAfterUtc = DateTimeOffset.MinValue;
+    }
+
+    private async Task DisconnectCoreAsync()
+    {
+        var session = _session;
+        _session = null;
+        _connectionKey = null;
+        if (session is not null) await session.DisposeAsync();
+    }
+
+    private void RegisterFailure()
+    {
+        var seconds = Math.Min(600, 30 * Math.Pow(2, Math.Min(_failureCount, 5)));
+        _failureCount++;
+        _retryAfterUtc = DateTimeOffset.UtcNow.AddSeconds(seconds);
+    }
+
+    private static bool IsTransient(Exception exception)
+        => exception is IOException or SocketException or MailKit.Security.AuthenticationException or SslHandshakeException or MailKit.ServiceNotConnectedException or MailKit.ProtocolException;
+
+    public void Dispose()
+    {
+        try
+        {
+            _gate.Wait();
+            try { DisconnectCoreAsync().GetAwaiter().GetResult(); }
+            catch { }
+            finally { _gate.Release(); }
+        }
+        finally { _gate.Dispose(); }
+    }
+}
+
+public sealed class MailKitMailboxSessionFactory : IMailboxSessionFactory
+{
+    public async Task<IMailboxSession> ConnectAsync(string account, string password, string host, int port, CancellationToken cancellationToken)
+    {
+        var client = new ImapClient { Timeout = 30_000 };
+        try
+        {
+            await client.ConnectAsync(host, port, true, cancellationToken);
+            await client.AuthenticateAsync(account, password, cancellationToken);
+            return new MailKitMailboxSession(client);
+        }
+        catch
+        {
+            client.Dispose();
+            throw;
+        }
+    }
+}
+
+public sealed class MailKitMailboxSession(ImapClient client) : IMailboxSession
+{
+    private const string Sender = "sino-esign@sinotrans.com";
+    private const string SubjectPrefix = "中外运向您提交了开票申请";
+
+    public bool IsConnected => client.IsConnected && client.IsAuthenticated;
+
+    public async Task<IReadOnlyList<MailboxMessage>> FetchCandidateMessagesAsync(DateTimeOffset monitorFromUtc, CancellationToken cancellationToken)
+    {
         var inbox = client.Inbox;
-        await inbox.OpenAsync(FolderAccess.ReadOnly, cancellationToken);
+        if (!inbox.IsOpen) await inbox.OpenAsync(FolderAccess.ReadOnly, cancellationToken);
 
         var imapDateFloor = monitorFromUtc.UtcDateTime.Date.AddDays(-1);
         var query = SearchQuery.FromContains(Sender)
             .And(SearchQuery.SubjectContains(SubjectPrefix))
             .And(SearchQuery.DeliveredAfter(imapDateFloor));
         var uids = await inbox.SearchAsync(query, cancellationToken);
-        var selected = uids.OrderByDescending(x => x.Id).Take(Math.Clamp(maxMessages, 1, 500)).OrderBy(x => x.Id).ToArray();
-        var uidValidity = inbox.UidValidity;
-        var result = new List<MailEnvelope>(selected.Length);
-
-        foreach (var uid in selected)
+        var summaries = await inbox.FetchAsync(uids, MessageSummaryItems.Envelope | MessageSummaryItems.InternalDate, cancellationToken);
+        var result = new List<MailboxMessage>(summaries.Count);
+        foreach (var summary in summaries.OrderBy(x => x.UniqueId.Id))
         {
-            var message = await inbox.GetMessageAsync(uid, cancellationToken);
-            var from = message.From.Mailboxes.FirstOrDefault()?.Address?.Trim().ToLowerInvariant() ?? string.Empty;
-            var subject = message.Subject?.Trim() ?? string.Empty;
-            if (!string.Equals(from, Sender, StringComparison.OrdinalIgnoreCase) || !subject.StartsWith(SubjectPrefix, StringComparison.Ordinal))
-                continue;
-            if (message.Date.ToUniversalTime() < monitorFromUtc.ToUniversalTime())
-                continue;
-
-            result.Add(new MailEnvelope(
-                uid.Id,
-                message.MessageId ?? string.Empty,
-                from,
-                subject,
-                message.Date,
-                message.TextBody ?? message.HtmlBody ?? string.Empty,
-                uidValidity,
-                inbox.FullName));
+            cancellationToken.ThrowIfCancellationRequested();
+            var receivedAt = summary.InternalDate ?? DateTimeOffset.MinValue;
+            if (receivedAt < monitorFromUtc) continue;
+            try
+            {
+                var message = await inbox.GetMessageAsync(summary.UniqueId, cancellationToken);
+                var from = message.From.Mailboxes.Select(x => x.Address ?? string.Empty).ToArray();
+                result.Add(new MailboxMessage(summary.UniqueId.Id, inbox.UidValidity, inbox.FullName, receivedAt, from, message.Subject ?? string.Empty, message.MessageId ?? string.Empty, message.TextBody ?? message.HtmlBody ?? string.Empty));
+            }
+            catch (MimeKit.ParseException ex)
+            {
+                result.Add(new MailboxMessage(
+                    summary.UniqueId.Id,
+                    inbox.UidValidity,
+                    inbox.FullName,
+                    receivedAt,
+                    summary.Envelope?.From.Mailboxes.Select(x => x.Address ?? string.Empty).ToArray() ?? [],
+                    summary.Envelope?.Subject ?? string.Empty,
+                    summary.Envelope?.MessageId ?? string.Empty,
+                    string.Empty,
+                    $"邮件 MIME 解析失败：{ex.Message}"));
+            }
         }
 
-        await client.DisconnectAsync(true, cancellationToken);
         return result;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (client.IsConnected) await client.DisconnectAsync(true);
+        }
+        finally
+        {
+            client.Dispose();
+        }
     }
 }
 
+public sealed class MailboxBackoffException(string message) : IOException(message);
+
 public sealed class SqliteInvoiceRepository(string databasePath)
 {
-    private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString();
+    private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false, DefaultTimeout = 30 }.ToString();
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         var directory = Path.GetDirectoryName(databasePath);
         if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await OpenConnectionAsync(cancellationToken);
         var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=10000;";
+        await command.ExecuteNonQueryAsync(cancellationToken);
+        command = connection.CreateCommand();
         command.CommandText = """
             CREATE TABLE IF NOT EXISTS invoice_applications (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,8 +286,9 @@ public sealed class SqliteInvoiceRepository(string databasePath)
 
         await EnsureColumnAsync(connection, "uid_validity", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
         await EnsureColumnAsync(connection, "mailbox_name", "TEXT NOT NULL DEFAULT 'INBOX'", cancellationToken);
+        await EnsureColumnAsync(connection, "mailbox_identity", "TEXT NOT NULL DEFAULT ''", cancellationToken);
         command = connection.CreateCommand();
-        command.CommandText = "DROP INDEX IF EXISTS ux_invoice_uid; CREATE UNIQUE INDEX IF NOT EXISTS ux_invoice_uid ON invoice_applications(mailbox_identity, mailbox_name, uid_validity, imap_uid);";
+        command.CommandText = "DROP INDEX IF EXISTS ux_invoice_message_id; DROP INDEX IF EXISTS ux_invoice_fallback_hash; DROP INDEX IF EXISTS ux_invoice_uid; CREATE UNIQUE INDEX IF NOT EXISTS ux_invoice_message_id ON invoice_applications(mailbox_identity, message_id) WHERE message_id <> ''; CREATE UNIQUE INDEX IF NOT EXISTS ux_invoice_fallback_hash ON invoice_applications(mailbox_identity, fallback_hash); CREATE UNIQUE INDEX IF NOT EXISTS ux_invoice_uid ON invoice_applications(mailbox_identity, mailbox_name, uid_validity, imap_uid);";
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -123,22 +296,31 @@ public sealed class SqliteInvoiceRepository(string databasePath)
         => await ExistsAsync(messageId, uid, mailboxIdentity, "INBOX", 0, fallbackHash, cancellationToken);
 
     public async Task<bool> ExistsAsync(string messageId, uint uid, string mailboxIdentity, string mailboxName, uint uidValidity, string fallbackHash, CancellationToken cancellationToken = default)
+        => await ExistsAnyAsync(messageId, uid, mailboxIdentity, mailboxName, uidValidity, fallbackHash, null, cancellationToken);
+
+    private async Task<bool> ExistsAnyAsync(string messageId, uint uid, string mailboxIdentity, string mailboxName, uint uidValidity, string fallbackHash, string? legacyFallbackHash, CancellationToken cancellationToken)
     {
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await OpenConnectionAsync(cancellationToken);
         var command = connection.CreateCommand();
-        command.CommandText = "SELECT 1 FROM invoice_applications WHERE (message_id <> '' AND message_id = $messageId) OR (mailbox_identity = $mailbox AND mailbox_name = $mailboxName AND uid_validity = $uidValidity AND imap_uid = $uid) OR fallback_hash = $hash LIMIT 1;";
+        command.CommandText = "SELECT 1 FROM invoice_applications WHERE (message_id <> '' AND message_id = $messageId AND mailbox_identity = $mailbox) OR (mailbox_identity = $mailbox AND mailbox_name = $mailboxName AND uid_validity = $uidValidity AND imap_uid = $uid) OR (mailbox_identity = $mailbox AND (fallback_hash = $hash OR ($legacyHash IS NOT NULL AND fallback_hash = $legacyHash))) LIMIT 1;";
         command.Parameters.AddWithValue("$messageId", messageId);
         command.Parameters.AddWithValue("$mailbox", mailboxIdentity);
         command.Parameters.AddWithValue("$mailboxName", mailboxName);
         command.Parameters.AddWithValue("$uidValidity", (long)uidValidity);
         command.Parameters.AddWithValue("$uid", (long)uid);
         command.Parameters.AddWithValue("$hash", fallbackHash);
+        command.Parameters.AddWithValue("$legacyHash", (object?)legacyFallbackHash ?? DBNull.Value);
         return await command.ExecuteScalarAsync(cancellationToken) is not null;
     }
 
     public async Task<long?> TryInsertAsync(InvoiceApplication app, string fallbackHash, CancellationToken cancellationToken = default)
     {
+        var legacyFallbackHash = app.ProcessingStatus == ProcessingStatus.Parsed
+            ? Deduplication.CreateLegacyFallbackHash(app)
+            : null;
+        if (await ExistsAnyAsync(app.MessageId, app.ImapUid, app.MailboxIdentity, app.MailboxName, app.UidValidity, fallbackHash, legacyFallbackHash, cancellationToken))
+            return null;
+
         try
         {
             return await InsertAsync(app, fallbackHash, cancellationToken);
@@ -151,8 +333,7 @@ public sealed class SqliteInvoiceRepository(string databasePath)
 
     public async Task<long> InsertAsync(InvoiceApplication app, string fallbackHash, CancellationToken cancellationToken = default)
     {
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await OpenConnectionAsync(cancellationToken);
         var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO invoice_applications (
@@ -171,8 +352,7 @@ public sealed class SqliteInvoiceRepository(string databasePath)
 
     public async Task UpdateStatusAsync(long id, ProcessingStatus status, string? error = null, int? excelRow = null, CancellationToken cancellationToken = default)
     {
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await OpenConnectionAsync(cancellationToken);
         var command = connection.CreateCommand();
         command.CommandText = "UPDATE invoice_applications SET processing_status=$status, error_message=$error, excel_row=COALESCE($row, excel_row), updated_at=$updated WHERE id=$id;";
         command.Parameters.AddWithValue("$status", (int)status);
@@ -186,8 +366,7 @@ public sealed class SqliteInvoiceRepository(string databasePath)
     public async Task<IReadOnlyList<InvoiceApplication>> GetRecentAsync(int limit, CancellationToken cancellationToken = default)
     {
         var result = new List<InvoiceApplication>();
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await OpenConnectionAsync(cancellationToken);
         var command = connection.CreateCommand();
         command.CommandText = "SELECT * FROM invoice_applications ORDER BY id DESC LIMIT $limit;";
         command.Parameters.AddWithValue("$limit", limit);
@@ -199,13 +378,47 @@ public sealed class SqliteInvoiceRepository(string databasePath)
     public async Task<IReadOnlyList<InvoiceApplication>> GetPendingExcelAsync(CancellationToken cancellationToken = default)
     {
         var result = new List<InvoiceApplication>();
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await OpenConnectionAsync(cancellationToken);
         var command = connection.CreateCommand();
         command.CommandText = "SELECT * FROM invoice_applications WHERE processing_status IN (2, 5) ORDER BY id;";
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken)) result.Add(Map(reader));
         return result;
+    }
+
+    public async Task<IReadOnlyList<InvoiceApplication>> GetParseFailedAsync(CancellationToken cancellationToken = default)
+    {
+        var result = new List<InvoiceApplication>();
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT * FROM invoice_applications WHERE processing_status = $status ORDER BY id;";
+        command.Parameters.AddWithValue("$status", (int)ProcessingStatus.ParseFailed);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) result.Add(Map(reader));
+        return result;
+    }
+
+    public async Task UpdateParsedAsync(long id, InvoiceApplication app, string fallbackHash, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE invoice_applications SET
+                company_name=$company, credit_code=$credit, amount=$amount, apply_time=$apply,
+                invoice_type=$type, recipient=$recipient, phone=$phone, address=$address, email=$email, remark=$remark,
+                message_id=$messageId, imap_uid=$uid, uid_validity=$uidValidity, mailbox_name=$mailboxName,
+                mailbox_identity=$mailbox, mail_received_at=$received, mail_subject=$subject, mail_from=$from,
+                normalized_body=$body, processing_status=$status, excel_row=$excelRow, updated_at=$updated,
+                error_message=$error, fallback_hash=$hash
+            WHERE id=$id;
+            """;
+        app.Id = id;
+        app.ProcessingStatus = ProcessingStatus.PendingExcel;
+        app.ErrorMessage = string.Empty;
+        app.UpdatedAt = DateTimeOffset.Now;
+        AddParameters(command, app, fallbackHash);
+        command.Parameters.AddWithValue("$id", id);
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static void AddParameters(SqliteCommand command, InvoiceApplication app, string hash)
@@ -235,6 +448,24 @@ public sealed class SqliteInvoiceRepository(string databasePath)
         command.Parameters.AddWithValue("$updated", app.UpdatedAt.ToString("O"));
         command.Parameters.AddWithValue("$error", app.ErrorMessage);
         command.Parameters.AddWithValue("$hash", hash);
+    }
+
+    private async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken)
+    {
+        var connection = new SqliteConnection(_connectionString);
+        try
+        {
+            await connection.OpenAsync(cancellationToken);
+            var pragma = connection.CreateCommand();
+            pragma.CommandText = "PRAGMA busy_timeout=10000;";
+            await pragma.ExecuteNonQueryAsync(cancellationToken);
+            return connection;
+        }
+        catch
+        {
+            await connection.DisposeAsync();
+            throw;
+        }
     }
 
     private static InvoiceApplication Map(SqliteDataReader r) => new()
@@ -297,8 +528,46 @@ public sealed class SqliteInvoiceRepository(string databasePath)
 
 public sealed class ExcelRowOccupiedException(string message) : Exception(message);
 
+public sealed class ExcelWriterLock : IDisposable
+{
+    private readonly Semaphore _semaphore;
+    private bool _released;
+
+    internal ExcelWriterLock(Semaphore semaphore) => _semaphore = semaphore;
+
+    public void Dispose()
+    {
+        if (_released) return;
+        _released = true;
+        _semaphore.Release();
+        _semaphore.Dispose();
+    }
+}
+
 public sealed class ExcelWriter
 {
+    private const string LockName = "Local\\InvoiceMailAssistant.ExcelWrite";
+
+    public async Task<ExcelWriterLock> AcquireWriteLockAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var semaphore = new Semaphore(1, 1, LockName);
+        var acquired = false;
+        try
+        {
+            acquired = await Task.Run(() => semaphore.WaitOne(TimeSpan.FromSeconds(30)), CancellationToken.None);
+            if (!acquired) throw new IOException("Excel 写入锁等待超时，申请将保留在等待队列。");
+            cancellationToken.ThrowIfCancellationRequested();
+            return new ExcelWriterLock(semaphore);
+        }
+        catch
+        {
+            if (acquired) semaphore.Release();
+            semaphore.Dispose();
+            throw;
+        }
+    }
+
     public int ResolveTargetRow(InvoiceApplication application, string filePath, string worksheetName)
     {
         EnsureWritable(filePath);
@@ -313,23 +582,31 @@ public sealed class ExcelWriter
                 return plannedRow;
             if (RowIsEmpty(worksheet, plannedRow))
                 return plannedRow;
+
+            // A user may have inserted rows above a previously planned row.
+            // Reuse a matching row only when it is unambiguous; otherwise keep
+            // the record pending instead of risking a different application.
+            var existingRow = FindMatchingRow(worksheet, application, Math.Max(lastUsed, plannedRow));
+            if (existingRow is not null) return existingRow.Value;
         }
 
         return Math.Max(lastUsed + 1, 2);
     }
 
-    public Task<int> WriteAsync(InvoiceApplication application, string filePath, string worksheetName, CancellationToken cancellationToken = default)
+    public async Task<int> WriteAsync(InvoiceApplication application, string filePath, string worksheetName, CancellationToken cancellationToken = default, ExcelWriterLock? writeLock = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        EnsureWritable(filePath);
+        ExcelWriterLock? ownedLock = null;
+        if (writeLock is null) ownedLock = await AcquireWriteLockAsync(cancellationToken);
 
         var directory = Path.GetDirectoryName(filePath)!;
         var tempPath = Path.Combine(directory, $".{Path.GetFileName(filePath)}.{Guid.NewGuid():N}.tmp.xlsx");
-        var originalWorksheetParts = ReadPreservedWorksheetParts(filePath, worksheetName);
-        File.Copy(filePath, tempPath, true);
 
         try
         {
+            EnsureWritable(filePath);
+            var originalWorksheetParts = ReadPreservedWorksheetParts(filePath, worksheetName);
+            File.Copy(filePath, tempPath, true);
             var row = application.ExcelRow ?? throw new InvalidOperationException("尚未为 Excel 写入预留目标行。");
             using (var workbook = new XLWorkbook(tempPath))
             {
@@ -337,10 +614,19 @@ public sealed class ExcelWriter
                     throw new InvalidOperationException($"工作表不存在：{worksheetName}");
 
                 if (RowMatches(worksheet, row, application))
-                    return Task.FromResult(row);
+                    return row;
 
                 if (!RowIsEmpty(worksheet, row))
-                    throw new ExcelRowOccupiedException($"Excel 第 {row} 行已被其他数据占用，请重新规划目标行。");
+                {
+                    var existingRow = FindMatchingRow(worksheet, application, Math.Max(row, worksheet.LastRowUsed()?.RowNumber() ?? row));
+                    if (existingRow is null)
+                        throw new ExcelRowOccupiedException($"Excel 第 {row} 行已被其他数据占用，请重新规划目标行。");
+                    row = existingRow.Value;
+                    application.ExcelRow = row;
+                }
+
+                if (RowMatches(worksheet, row, application))
+                    return row;
 
                 if (row > 2) CopyRowStyle(worksheet, row - 1, row);
 
@@ -368,12 +654,16 @@ public sealed class ExcelWriter
                     throw new InvalidDataException("Excel 临时文件校验失败：目标行内容不一致。");
             }
 
-            File.Move(tempPath, filePath, true);
-            return Task.FromResult(row);
+            using (var durable = new FileStream(tempPath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read))
+                durable.Flush(true);
+
+            File.Replace(tempPath, filePath, null, true);
+            return row;
         }
         finally
         {
             if (File.Exists(tempPath)) File.Delete(tempPath);
+            ownedLock?.Dispose();
         }
     }
 
@@ -391,7 +681,22 @@ public sealed class ExcelWriter
     }
 
     private static bool RowIsEmpty(IXLWorksheet worksheet, int row)
-        => Enumerable.Range(1, 8).All(column => worksheet.Cell(row, column).IsEmpty());
+    {
+        var lastColumn = Math.Max(8, worksheet.LastColumnUsed()?.ColumnNumber() ?? 8);
+        return Enumerable.Range(1, lastColumn).All(column => worksheet.Cell(row, column).IsEmpty());
+    }
+
+    private static int? FindMatchingRow(IXLWorksheet worksheet, InvoiceApplication application, int lastRow)
+    {
+        int? match = null;
+        for (var row = 2; row <= lastRow; row++)
+        {
+            if (!RowMatches(worksheet, row, application)) continue;
+            if (match is not null) return null;
+            match = row;
+        }
+        return match;
+    }
 
     private static bool RowMatches(IXLWorksheet worksheet, int row, InvoiceApplication application)
     {
@@ -425,6 +730,8 @@ public sealed class ExcelWriter
     }
 
     private sealed record PreservedWorksheetParts(
+        XElement? SheetProperties,
+        XElement? SheetFormatProperties,
         XElement? FreezePane,
         XElement? PrintOptions,
         XElement? PageMargins,
@@ -444,6 +751,8 @@ public sealed class ExcelWriter
         var root = document.Root ?? throw new InvalidDataException($"工作表 XML 无根节点：{worksheetName}");
         var sheetView = root.Element(spreadsheet + "sheetViews")?.Elements(spreadsheet + "sheetView").FirstOrDefault();
         return new PreservedWorksheetParts(
+            CloneElement(root.Element(spreadsheet + "sheetPr")),
+            CloneElement(root.Element(spreadsheet + "sheetFormatPr")),
             CloneElement(sheetView?.Element(spreadsheet + "pane")),
             CloneElement(root.Element(spreadsheet + "printOptions")),
             CloneElement(root.Element(spreadsheet + "pageMargins")),
@@ -462,13 +771,15 @@ public sealed class ExcelWriter
         using (var stream = entry.Open()) document = XDocument.Load(stream);
 
         XNamespace spreadsheet = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        var root = document.Root ?? throw new InvalidDataException($"工作表 XML 无根节点：{worksheetName}");
+        ReplaceChild(root, spreadsheet + "sheetPr", originalParts.SheetProperties);
+        ReplaceChild(root, spreadsheet + "sheetFormatPr", originalParts.SheetFormatProperties);
         var sheetView = document.Root?.Element(spreadsheet + "sheetViews")?.Elements(spreadsheet + "sheetView").FirstOrDefault();
         if (sheetView is not null)
         {
             ReplaceChild(sheetView, spreadsheet + "pane", originalParts.FreezePane);
         }
 
-        var root = document.Root ?? throw new InvalidDataException($"工作表 XML 无根节点：{worksheetName}");
         ReplaceChild(root, spreadsheet + "printOptions", originalParts.PrintOptions);
         ReplaceChild(root, spreadsheet + "pageMargins", originalParts.PageMargins);
         ReplaceChild(root, spreadsheet + "pageSetup", originalParts.PageSetup);
@@ -531,7 +842,21 @@ public sealed class DpapiCredentialStore(string directory)
     {
         Directory.CreateDirectory(directory);
         var cipher = ProtectedData.Protect(Encoding.UTF8.GetBytes(password), Entropy(account), DataProtectionScope.CurrentUser);
-        await File.WriteAllBytesAsync(PathFor(account), cipher, cancellationToken);
+        var path = PathFor(account);
+        var tempPath = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            await File.WriteAllBytesAsync(tempPath, cipher, cancellationToken);
+            using (var durable = new FileStream(tempPath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read))
+                durable.Flush(true);
+
+            if (File.Exists(path)) File.Replace(tempPath, path, null, true);
+            else File.Move(tempPath, path);
+        }
+        finally
+        {
+            if (File.Exists(tempPath)) File.Delete(tempPath);
+        }
     }
 
     public async Task<string?> LoadAsync(string account, CancellationToken cancellationToken = default)
@@ -543,6 +868,42 @@ public sealed class DpapiCredentialStore(string directory)
         return Encoding.UTF8.GetString(clear);
     }
 
+    public Task DeleteAsync(string account, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var path = PathFor(account);
+        if (File.Exists(path)) File.Delete(path);
+        return Task.CompletedTask;
+    }
+
     private static byte[] Entropy(string account) => SHA256.HashData(Encoding.UTF8.GetBytes($"InvoiceMailAssistant|{account.Trim().ToLowerInvariant()}"));
     private string PathFor(string account) => Path.Combine(directory, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(account.Trim().ToLowerInvariant()))) + ".cred");
+}
+
+public static class StartupManager
+{
+    private const string RunKey = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+    private const string ValueName = "InvoiceMailAssistant";
+
+    public static void SetEnabled(bool enabled)
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(RunKey, true)
+                ?? throw new InvalidOperationException("无法打开当前用户的开机启动注册表项。");
+            if (!enabled)
+            {
+                key.DeleteValue(ValueName, false);
+                return;
+            }
+
+            var processPath = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(processPath)) throw new InvalidOperationException("无法确定程序路径。");
+            key.SetValue(ValueName, $"\"{processPath}\"");
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or SecurityException or IOException)
+        {
+            throw new InvalidOperationException("开机启动设置失败。", ex);
+        }
+    }
 }

@@ -10,15 +10,15 @@ public sealed class InvoiceParserTests
     {
         const string body = """
             中外运向您提交了开票申请，申请信息如下：
-            公司名称：烟台市八达物流有限公司
-            信用代码：9137060074898170XT
+            公司名称：测试物流有限公司
+            信用代码：TEST-CREDIT-20260808
             申请金额 ：300.0 元
             申请时间：2026-08-07 10:28
             开票方式：电子票
-            收件人：孔祥民
-            联系电话：13285353939
-            寄送地址：烟台市冰轮路华海物流园F区-6
-            邮箱：mailto:kongxiangmin@ytbdwl.com
+            收件人：测试收件人
+            联系电话：13800000000
+            寄送地址：测试省测试市测试路 1 号
+            邮箱：mailto:invoice@example.com
             开票备注：对公打款
             """;
 
@@ -26,11 +26,11 @@ public sealed class InvoiceParserTests
         var result = new InvoiceParser().Parse(mail, "test@example.com");
 
         Assert.True(result.Success);
-        Assert.Equal("烟台市八达物流有限公司", result.Application!.CompanyName);
-        Assert.Equal("9137060074898170XT", result.Application.CreditCode);
+        Assert.Equal("测试物流有限公司", result.Application!.CompanyName);
+        Assert.Equal("TEST-CREDIT-20260808", result.Application.CreditCode);
         Assert.Equal(300m, result.Application.Amount);
         Assert.Equal(new DateTime(2026, 8, 7, 10, 28, 0), result.Application.ApplyTime);
-        Assert.Equal("kongxiangmin@ytbdwl.com", result.Application.Email);
+        Assert.Equal("invoice@example.com", result.Application.Email);
         Assert.Equal("对公打款", result.Application.Remark);
     }
 

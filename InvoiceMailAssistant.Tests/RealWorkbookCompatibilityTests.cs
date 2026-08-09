@@ -4,23 +4,22 @@ using System.Xml.Linq;
 using ClosedXML.Excel;
 using InvoiceMailAssistant.App;
 using Xunit;
-using Xunit.Sdk;
 
 namespace InvoiceMailAssistant.Tests;
 
 public sealed class RealWorkbookCompatibilityTests
 {
-    [Fact]
+    [RealWorkbookFact]
     public async Task RealWorkbookCopyPreservesStructureAndManualColumns()
     {
         var path = Environment.GetEnvironmentVariable("INVOICE_REAL_XLSX_COPY");
-        if (string.IsNullOrWhiteSpace(path)) throw SkipException.ForSkip("Set INVOICE_REAL_XLSX_COPY to run the real workbook copy regression.");
+        Assert.False(string.IsNullOrWhiteSpace(path));
         Assert.True(File.Exists(path), $"Real workbook copy not found: {path}");
 
         var before = WorkbookSnapshot.Read(path!);
         var application = new InvoiceApplication
         {
-            CompanyName = "Codex 真实工作簿回归测试",
+            CompanyName = "合成工作簿回归测试",
             CreditCode = "TEST-CODE-20260808",
             Amount = 123.45m,
             ApplyTime = new DateTime(2026, 8, 8, 10, 30, 0),
@@ -105,12 +104,20 @@ public sealed class RealWorkbookCompatibilityTests
             var root = document.Root!;
             var structure = string.Join("\n", new[]
             {
+                ElementXml(root.Element(spreadsheet + "sheetPr")),
+                ElementXml(root.Element(spreadsheet + "sheetFormatPr")),
                 ElementXml(root.Element(spreadsheet + "cols")),
                 ElementXml(root.Element(spreadsheet + "mergeCells")),
                 ElementXml(root.Element(spreadsheet + "sheetViews")?.Element(spreadsheet + "sheetView")?.Element(spreadsheet + "pane")),
+                string.Join("", root.Descendants(spreadsheet + "row").Where(x => string.Equals((string?)x.Attribute("hidden"), "1", StringComparison.OrdinalIgnoreCase) || string.Equals((string?)x.Attribute("hidden"), "true", StringComparison.OrdinalIgnoreCase)).Select(ElementXml)),
                 string.Join("", root.Elements(spreadsheet + "conditionalFormatting").Select(ElementXml)),
+                ElementXml(root.Element(spreadsheet + "dataValidations")),
                 ElementXml(root.Element(spreadsheet + "pageMargins")),
-                ElementXml(root.Element(spreadsheet + "pageSetup"))
+                ElementXml(root.Element(spreadsheet + "pageSetup")),
+                ElementXml(root.Element(spreadsheet + "printOptions")),
+                ElementXml(root.Element(spreadsheet + "headerFooter")),
+                ElementXml(root.Element(spreadsheet + "rowBreaks")),
+                ElementXml(root.Element(spreadsheet + "colBreaks"))
             });
 
             var cells = root.Descendants(spreadsheet + "c")
@@ -154,5 +161,14 @@ public sealed class RealWorkbookCompatibilityTests
                 return width.ToString("0.######", CultureInfo.InvariantCulture);
             return attribute.Value;
         }
+    }
+}
+
+public sealed class RealWorkbookFactAttribute : FactAttribute
+{
+    public RealWorkbookFactAttribute()
+    {
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("INVOICE_REAL_XLSX_COPY")))
+            Skip = "Set INVOICE_REAL_XLSX_COPY to run the isolated real-workbook regression.";
     }
 }

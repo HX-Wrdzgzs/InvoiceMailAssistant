@@ -28,11 +28,11 @@ public sealed class ExcelWriterTests
 
             var app = new InvoiceApplication
             {
-                CompanyName = "烟台市八达物流有限公司",
-                CreditCode = "9137060074898170XT",
+                CompanyName = "测试物流有限公司",
+                CreditCode = "TEST-CREDIT-20260808",
                 Amount = 300m,
                 ApplyTime = new DateTime(2026, 8, 7, 10, 28, 0),
-                Email = "kongxiangmin@ytbdwl.com"
+                Email = "invoice@example.com"
             };
             var writer = new ExcelWriter();
             app.ExcelRow = writer.ResolveTargetRow(app, path, "中外运");
@@ -48,11 +48,11 @@ public sealed class ExcelWriterTests
             using var verify = new XLWorkbook(path);
             var sheet = verify.Worksheet("中外运");
             Assert.Equal("8.7", sheet.Cell(2, 1).GetString());
-            Assert.Equal("烟台市八达物流有限公司", sheet.Cell(2, 2).GetString());
-            Assert.Equal("9137060074898170XT", sheet.Cell(2, 3).GetString());
+            Assert.Equal("测试物流有限公司", sheet.Cell(2, 2).GetString());
+            Assert.Equal("TEST-CREDIT-20260808", sheet.Cell(2, 3).GetString());
             Assert.Equal(300m, sheet.Cell(2, 4).GetValue<decimal>());
             Assert.True(sheet.Cell(2, 5).IsEmpty());
-            Assert.Equal("kongxiangmin@ytbdwl.com", sheet.Cell(2, 6).GetString());
+            Assert.Equal("invoice@example.com", sheet.Cell(2, 6).GetString());
             Assert.True(sheet.Cell(2, 7).IsEmpty());
             Assert.True(sheet.Cell(2, 8).IsEmpty());
             Assert.True(sheet.Cell(3, 2).IsEmpty());
@@ -161,6 +161,39 @@ public sealed class ExcelWriterTests
     }
 
     [Fact]
+    public async Task FindsExistingApplicationAfterManualRowInsertion()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"invoice-mail-{Guid.NewGuid():N}.xlsx");
+        try
+        {
+            using (var workbook = new XLWorkbook())
+            {
+                var sheet = workbook.AddWorksheet("中外运");
+                sheet.Cell(1, 1).Value = "日期";
+                sheet.Cell(2, 2).Value = "前置人工行";
+                sheet.Cell(3, 2).Value = "测试企业";
+                sheet.Cell(3, 3).Value = "CODE-1";
+                sheet.Cell(3, 4).Value = 100m;
+                sheet.Cell(3, 6).Value = "finance@example.com";
+                workbook.SaveAs(path);
+            }
+
+            var app = CreateApplication(2);
+            var writer = new ExcelWriter();
+            Assert.Equal(3, writer.ResolveTargetRow(app, path, "中外运"));
+            Assert.Equal(3, await writer.WriteAsync(app, path, "中外运"));
+
+            using var verify = new XLWorkbook(path);
+            Assert.Equal("前置人工行", verify.Worksheet("中外运").Cell(2, 2).GetString());
+            Assert.Equal(3, writer.ResolveTargetRow(app, path, "中外运"));
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task KeepsManualColumnsUntouched()
     {
         var path = Path.Combine(Path.GetTempPath(), $"invoice-mail-{Guid.NewGuid():N}.xlsx");
@@ -189,6 +222,47 @@ public sealed class ExcelWriterTests
             Assert.Equal("人工到账时间", verifySheet.Cell(2, 5).GetString());
             Assert.Equal("是", verifySheet.Cell(2, 7).GetString());
             Assert.Equal("否", verifySheet.Cell(2, 8).GetString());
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task ConcurrentDifferentApplicationsCannotOverwriteTheSameRow()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"invoice-mail-{Guid.NewGuid():N}.xlsx");
+        try
+        {
+            using (var workbook = new XLWorkbook())
+            {
+                var sheet = workbook.AddWorksheet("中外运");
+                sheet.Cell(1, 1).Value = "日期";
+                sheet.Cell(1, 2).Value = "企业名称";
+                workbook.SaveAs(path);
+            }
+
+            var first = CreateApplication(2);
+            first.CompanyName = "并发企业一";
+            var second = CreateApplication(2);
+            second.CompanyName = "并发企业二";
+            var writer = new ExcelWriter();
+
+            static async Task<Exception?> Capture(Func<Task<int>> write)
+            {
+                try { await write(); return null; }
+                catch (Exception ex) { return ex; }
+            }
+
+            var outcomes = await Task.WhenAll(
+                Capture(() => writer.WriteAsync(first, path, "中外运")),
+                Capture(() => writer.WriteAsync(second, path, "中外运")));
+
+            Assert.Single(outcomes, x => x is null);
+            Assert.Single(outcomes, x => x is ExcelRowOccupiedException);
+            using var verify = new XLWorkbook(path);
+            Assert.Contains(verify.Worksheet("中外运").Cell(2, 2).GetString(), new[] { "并发企业一", "并发企业二" });
         }
         finally
         {

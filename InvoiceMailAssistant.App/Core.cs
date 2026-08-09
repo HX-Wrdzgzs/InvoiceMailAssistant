@@ -54,7 +54,30 @@ public sealed record MailEnvelope(
     DateTimeOffset ReceivedAt,
     string BodyText,
     uint UidValidity = 0,
-    string MailboxName = "INBOX");
+    string MailboxName = "INBOX",
+    string? FetchError = null);
+
+public sealed record MailboxMessage(
+    uint Uid,
+    uint UidValidity,
+    string MailboxName,
+    DateTimeOffset InternalDate,
+    IReadOnlyList<string> FromAddresses,
+    string Subject,
+    string MessageId,
+    string BodyText,
+    string? FetchError = null);
+
+public interface IMailboxSession : IAsyncDisposable
+{
+    bool IsConnected { get; }
+    Task<IReadOnlyList<MailboxMessage>> FetchCandidateMessagesAsync(DateTimeOffset monitorFromUtc, CancellationToken cancellationToken);
+}
+
+public interface IMailboxSessionFactory
+{
+    Task<IMailboxSession> ConnectAsync(string account, string password, string host, int port, CancellationToken cancellationToken);
+}
 
 public sealed record ParseResult(bool Success, InvoiceApplication? Application, IReadOnlyList<string> MissingFields, string? Error)
 {
@@ -165,6 +188,22 @@ public sealed partial class InvoiceParser
 public static class Deduplication
 {
     public static string CreateFallbackHash(InvoiceApplication app)
+    {
+        var source = string.Join("|", [
+            app.MailboxIdentity.Trim().ToLowerInvariant(),
+            app.MailboxName.Trim().ToLowerInvariant(),
+            app.MailFrom.Trim().ToLowerInvariant(),
+            app.MailSubject.Trim(),
+            app.MailReceivedAt.ToUniversalTime().ToString("O"),
+            app.CreditCode.Trim().ToUpperInvariant(),
+            app.ApplyTime.ToString("O"),
+            app.Amount.ToString("0.####", CultureInfo.InvariantCulture),
+            app.NormalizedBody.Trim()
+        ]);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)));
+    }
+
+    public static string CreateLegacyFallbackHash(InvoiceApplication app)
     {
         var source = $"{app.CreditCode.Trim().ToUpperInvariant()}|{app.ApplyTime:O}|{app.Amount:0.####}|{app.MailFrom.Trim().ToLowerInvariant()}";
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)));
