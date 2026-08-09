@@ -1,0 +1,12 @@
+**/bin/
+**/obj/
+.vs/
+*.db
+*.db-shm
+*.db-wal
+logs/
+credentials/
+settings.json
+*.xlsx
+*.xlsm
+*.tmp.xlsx
