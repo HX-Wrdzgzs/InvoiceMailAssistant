@@ -92,4 +92,29 @@ public sealed class InvoiceParserTests
         Assert.False(result.Success);
         Assert.Contains("邮箱", result.MissingFields);
     }
+
+    [Fact]
+    public void UsesLaterNonEmptyValueWhenMultipartBodyRepeatsAnEmptyTemplate()
+    {
+        const string body = """
+            公司名称：
+            信用代码：
+            申请金额：
+            申请时间：
+            邮箱：
+            公司名称：测试物流有限公司
+            信用代码：TEST-CREDIT-REPEATED
+            申请金额：300 元
+            申请时间：2026-08-10 11:00
+            邮箱：invoice@example.com
+            """;
+        var mail = new MailEnvelope(17, "m-repeated", "sino-esign@sinotrans.com", "中外运向您提交了开票申请", DateTimeOffset.UtcNow, body);
+
+        var result = new InvoiceParser().Parse(mail, "test@example.com");
+
+        Assert.True(result.Success);
+        Assert.Equal("测试物流有限公司", result.Application!.CompanyName);
+        Assert.Equal("invoice@example.com", result.Application.Email);
+        Assert.Equal(300m, result.Application.Amount);
+    }
 }
