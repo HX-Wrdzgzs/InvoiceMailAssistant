@@ -670,9 +670,15 @@ public sealed class ExcelWriter
     private static void EnsureWritable(string filePath)
     {
         if (!File.Exists(filePath)) throw new FileNotFoundException("Excel 登记表不存在。", filePath);
+        if (File.GetAttributes(filePath).HasFlag(FileAttributes.ReadOnly))
+            throw new IOException("Excel 登记表处于只读属性，请取消只读后重试。");
         try
         {
             using var stream = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw new IOException("Excel 登记表没有写入权限，请检查文件权限后重试。", ex);
         }
         catch (IOException ex)
         {

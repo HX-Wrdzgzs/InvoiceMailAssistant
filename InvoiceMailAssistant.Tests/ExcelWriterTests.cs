@@ -300,6 +300,33 @@ public sealed class ExcelWriterTests
         }
     }
 
+    [Fact]
+    public void ReportsReadOnlyWorkbookClearly()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"invoice-mail-{Guid.NewGuid():N}.xlsx");
+        try
+        {
+            using (var workbook = new XLWorkbook())
+            {
+                workbook.AddWorksheet("中外运");
+                workbook.SaveAs(path);
+            }
+
+            File.SetAttributes(path, FileAttributes.ReadOnly);
+            var error = Assert.Throws<IOException>(() => new ExcelWriter().ResolveTargetRow(CreateApplication(2), path, "中外运"));
+
+            Assert.Contains("只读", error.Message);
+        }
+        finally
+        {
+            if (File.Exists(path))
+            {
+                File.SetAttributes(path, FileAttributes.Normal);
+                File.Delete(path);
+            }
+        }
+    }
+
     private static InvoiceApplication CreateApplication(int row)
         => new()
         {
