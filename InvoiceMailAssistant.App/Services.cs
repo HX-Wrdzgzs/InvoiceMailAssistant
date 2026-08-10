@@ -313,6 +313,514 @@ public sealed class SqliteInvoiceRepository(string databasePath)
         return await command.ExecuteScalarAsync(cancellationToken) is not null;
     }
 
-    public async Task<long?> TryInsertAsync(InvoiceApplication app, string fallbackHash, CancellationãÝ|¶‰žËkºwµç`¹•Ñ¥±•9…µ”¡™¥±•A…Ñ ¥ô¹íÕ¥¹9•ÝÕ¥ ¤é9ô¹ÑµÀ¹á±Íàˆ¤ì((€€€€€€€ÑÉä(€€€€€€€ì(€€€€€€€€€€€¹ÍÕÉ•]É¥Ñ…‰±”¡™¥±•A…Ñ ¤ì(€€€€€€€€€€€Ù…È½É¥¥¹…±]½É­Í¡••ÑA…ÉÑÌ€ôI•…‘AÉ•Í•ÉÙ•‘]½É­Í¡••ÑA…ÉÑÌ¡™¥±•A…Ñ °Ý½É­Í¡••Ñ9…µ”¤ì(€€€€€€€€€€€¥±”¹½Áä¡™¥±•A…Ñ °Ñ•µÁA…Ñ °ÑÉÕ”¤ì(€€€€€€€€€€€Ù…ÈÉ½Ü€ô…ÁÁ±¥…Ñ¥½¸¹á•±I½Ü€üüÑ¡É½Ü¹•Ü%¹Ù…±¥‘=Á•É…Ñ¥½¹á•ÁÑ¥½¸ ‹–Âkšr«’âèá•°ƒ–g–—¦ŠžVgžn»š‚¢†3Žˆ¤ì(€€€€€€€€€€€ÕÍ¥¹œ€¡Ù…ÈÝ½É­‰½½¬€ô¹•Üa1]½É­‰½½¬¡Ñ•µÁA…Ñ ¤¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€¥˜€ …Ý½É­‰½½¬¹]½É­Í¡••ÑÌ¹QÉå•Ñ]½É­Í¡••Ð¡Ý½É­Í¡••Ñ9…µ”°½ÕÐÙ…ÈÝ½É­Í¡••Ð¤¤(€€€€€€€€€€€€€€€€€€€Ñ¡É½Ü¹•Ü%¹Ù…±¥‘=Á•É…Ñ¥½¹á•ÁÑ¥½¸ ‹–Þ—’ös¢†£’â7–¶c–r£¾òiíÝ½É­Í¡••Ñ9…µ•ôˆ¤ì((€€€€€€€€€€€€€€€¥˜€¡I½Ý5…Ñ¡•Ì¡Ý½É­Í¡••Ð°É½Ü°…ÁÁ±¥…Ñ¥½¸¤¤(€€€€€€€€€€€€€€€€€€€É•ÑÕÉ¸É½Üì((€€€€€€€€€€€€€€€¥˜€ …I½Ý%ÍµÁÑä¡Ý½É­Í¡••Ð°É½Ü¤¤(€€€€€€€€€€€€€€€ì(€€€€€€€€€€€€€€€€€€€Ù…È•á¥ÍÑ¥¹I½Ü€ô¥¹‘5…Ñ¡¥¹I½Ü¡Ý½É­Í¡••Ð°…ÁÁ±¥…Ñ¥½¸°5…Ñ ¹5…à¡É½Ü°Ý½É­Í¡••Ð¹1…ÍÑI½ÝUÍ• ¤ü¹I½Ý9Õµ‰•È ¤€üüÉ½Ü¤¤ì(€€€€€€€€€€€€€€€€€€€¥˜€¡•á¥ÍÑ¥¹I½Ü¥Ì¹Õ±°¤(€€€€€€€€€€€€€€€€€€€€€€€Ñ¡É½Ü¹•Üá•±I½Ý=ÕÁ¥•‘á•ÁÑ¥½¸ ‰á•°ƒž²°íÉ½Ýôƒ¢†3–ÞË¢Š¯–Û’î[šVÃš6»–6ƒžR£¾ò3¢¾ß¦7šZÃ¢ž–"Kžn»š‚¢†3Žˆ¤ì(€€€€€€€€€€€€€€€€€€€É½Ü€ô•á¥ÍÑ¥¹I½Ü¹Y…±Õ”ì(€€€€€€€€€€€€€€€€€€€…ÁÁ±¥…Ñ¥½¸¹á•±I½Ü€ôÉ½Üì(€€€€€€€€€€€€€€€ô((€€€€€€€€€€€€€€€¥˜€¡I½Ý5…Ñ¡•Ì¡Ý½É­Í¡••Ð°É½Ü°…ÁÁ±¥…Ñ¥½¸¤¤(€€€€€€€€€€€€€€€€€€€É•ÑÕÉ¸É½Üì((€€€€€€€€€€€€€€€¥˜€¡É½Ü€ø€È¤½ÁåI½ÝMÑå±”¡Ý½É­Í¡••Ð°É½Ü€´€Ä°É½Ü¤ì((€€€€€€€€€€€€€€€Ù…ÈÁÉ•Ù¥½ÕÍ…Ñ”€ô¥¹‘AÉ•Ù¥½ÕÍÁÁ±¥…Ñ¥½¹…Ñ”¡Ý½É­Í¡••Ð°É½Ü€´€Ä°…ÁÁ±¥…Ñ¥½¸¹ÁÁ±åQ¥µ”¹e•…È¤ì(€€€€€€€€€€€€€€€¥˜€¡ÁÉ•Ù¥½ÕÍ…Ñ”ü¹…Ñ”€„ô…ÁÁ±¥…Ñ¥½¸¹ÁÁ±åQ¥µ”¹…Ñ”¤(€€€€€€€€€€€€€€€€€€€Ý½É­Í¡••Ð¹•±°¡É½Ü°€Ä¤¹Y…±Õ”€ô€‰í…ÁÁ±¥…Ñ¥½¸¹ÁÁ±åQ¥µ”¹5½¹Ñ¡ô¹í…ÁÁ±¥…Ñ¥½¸¹ÁÁ±åQ¥µ”¹…åôˆì(€€€€€€€€€€€€€€€•±Í”(€€€€€€€€€€€€€€€€€€€Ý½É­Í¡••Ð¹•±°¡É½Ü°€Ä¤¹±•…È¡a1±•…É=ÁÑ¥½¹Ì¹½¹Ñ•¹ÑÌ¤ì((€€€€€€€€€€€€€€€Ý½É­Í¡••Ð¹•±°¡É½Ü°€È¤¹Y…±Õ”€ô…ÁÁ±¥…Ñ¥½¸¹½µÁ…¹å9…µ”ì(€€€€€€€€€€€€€€€Ý½É­Í¡••Ð¹•±°¡É½Ü°€Ì¤¹M•ÑY…±Õ”¡…ÁÁ±¥…Ñ¥½¸¹É•‘¥Ñ½‘”¤ì(€€€€€€€€€€€€€€€Ý½É­Í¡••Ð¹•±°¡É½Ü°€Ì¤¹MÑå±”¹9Õµ‰•É½Éµ…Ð¹½Éµ…Ð€ô€‰ ˆì(€€€€€€€€€€€€€€€Ý½É­Í¡••Ð¹•±°¡É½Ü°€Ð¤¹Y…±Õ”€ô…ÁÁ±¥…Ñ¥½¸¹µ½Õ¹Ðì(€€€€€€€€€€€€€€€Ý½É­Í¡••Ð¹•±°¡É½Ü°€Ø¤¹M•ÑY…±Õ”¡…ÁÁ±¥…Ñ¥½¸¹µ…¥°¤ì(€€€€€€€€€€€€€€€Ý½É­Í¡••Ð¹•±°¡É½Ü°€Ø¤¹MÑå±”¹9Õµ‰•É½Éµ…Ð¹½Éµ…Ð€ô€‰ ˆì(€€€€€€€€€€€€€€€Ý½É­‰½½¬¹M…Ù•Ì¡Ñ•µÁA…Ñ ¤ì(€€€€€€€€€€€ô((€€€€€€€€€€€I•ÍÑ½É•AÉ•Í•ÉÙ•‘]½É­Í¡••ÑA…ÉÑÌ¡Ñ•µÁA…Ñ °Ý½É­Í¡••Ñ9…µ”°½É¥¥¹…±]½É­Í¡••ÑA…ÉÑÌ¤ì((€€€€€€€€€€€ÕÍ¥¹œ€¡Ù…ÈÙ•É¥™ä€ô¹•Üa1]½É­‰½½¬¡Ñ•µÁA…Ñ ¤¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€Ù…ÈÙ•É¥™åM¡••Ð€ôÙ•É¥™ä¹]½É­Í¡••Ð¡Ý½É­Í¡••Ñ9…µ”¤ì(€€€€€€€€€€€€€€€¥˜€ …I½Ý5…Ñ¡•Ì¡Ù•É¥™åM¡••Ð°É½Ü°…ÁÁ±¥…Ñ¥½¸¤¤(€€€€€€€€€€€€€€€€€€€Ñ¡É½Ü¹•Ü%¹Ù…±¥‘…Ñ…á•ÁÑ¥½¸ ‰á•°ƒ’âÓš^ÛšZ’îÛš‚‡¦ª3–’Ç¢Ò—¾òkžn»š‚¢†3––ºç’â7’â¢ÓŽˆ¤ì(€€€€€€€€€€€ô((€€€€€€€€€€€ÕÍ¥¹œ€¡Ù…È‘ÕÉ…‰±”€ô¹•Ü¥±•MÑÉ•…´¡Ñ•µÁA…Ñ °¥±•5½‘”¹=Á•¸°¥±••ÍÌ¹I•…‘]É¥Ñ”°¥±•M¡…É”¹I•…¤¤(€€€€€€€€€€€€€€€‘ÕÉ…‰±”¹±ÕÍ ¡ÑÉÕ”¤ì((€€€€€€€€€€€¥±”¹I•Á±…”¡Ñ•µÁA…Ñ °™¥±•A…Ñ °¹Õ±°°ÑÉÕ”¤ì(€€€€€€€€€€€É•ÑÕÉ¸É½Üì(€€€€€€€ô(€€€€€€€™¥¹…±±ä(€€€€€€€ì(€€€€€€€€€€€¥˜€¡¥±”¹á¥ÍÑÌ¡Ñ•µÁA…Ñ ¤¤¥±”¹•±•Ñ”¡Ñ•µÁA…Ñ ¤ì(€€€€€€€€€€€½Ý¹•‘1½¬ü¹¥ÍÁ½Í” ¤ì(€€€€€€€ô(€€€ô((€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥ŒÙ½¥¹ÍÕÉ•]É¥Ñ…‰±”¡ÍÑÉ¥¹œ™¥±•A…Ñ ¤(€€€ì(€€€€€€€¥˜€ …¥±”¹á¥ÍÑÌ¡™¥±•A…Ñ ¤¤Ñ¡É½Ü¹•Ü¥±•9½Ñ½Õ¹‘á•ÁÑ¥½¸ ‰á•°ƒžfï¢ºÃ¢†£’â7–¶c–r£Žˆ°™¥±•A…Ñ ¤ì(€€€€€€€ÑÉä(€€€€€€€ì(€€€€€€€€€€€ÕÍ¥¹œÙ…ÈÍÑÉ•…´€ô¹•Ü¥±•MÑÉ•…´¡™¥±•A…Ñ °¥±•5½‘”¹=Á•¸°¥±••ÍÌ¹I•…‘]É¥Ñ”°¥±•M¡…É”¹9½¹”¤ì(€€€€€€€ô(€€€€€€€…Ñ €¡%=á•ÁÑ¥½¸•à¤(€€€€€€€ì(€€€€€€€€€€€Ñ¡É½Ü¹•Ü%=á•ÁÑ¥½¸ ‰á•°ƒžfï¢ºÃ¢†£š¶–r£¢Š¯–6ƒžR£¾ò3žRÏ¢¾ß–Â’þwžVg–r£ž¶'–ú¦b–"_Žˆ°•à¤ì(€€€€€€€ô(€€€ô((€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥Œ‰½½°I½Ý%ÍµÁÑä¡%a1]½É­Í¡••ÐÝ½É­Í¡••Ð°¥¹ÐÉ½Ü¤(€€€ì(€€€€€€€Ù…È±…ÍÑ½±Õµ¸€ô5…Ñ ¹5…à à°Ý½É­Í¡••Ð¹1…ÍÑ½±Õµ¹UÍ• ¤ü¹½±Õµ¹9Õµ‰•È ¤€üü€à¤ì(€€€€€€€É•ÑÕÉ¸¹Õµ•É…‰±”¹I…¹” Ä°±…ÍÑ½±Õµ¸¤¹±°¡½±Õµ¸€ôøÝ½É­Í¡••Ð¹•±°¡É½Ü°½±Õµ¸¤¹%ÍµÁÑä ¤¤ì(€€€ô((€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥Œ¥¹Ðü¥¹‘5…Ñ¡¥¹I½Ü¡%a1]½É­Í¡••ÐÝ½É­Í¡••Ð°%¹Ù½¥•ÁÁ±¥…Ñ¥½¸…ÁÁ±¥…Ñ¥½¸°¥¹Ð±…ÍÑI½Ü¤(€€€ì(€€€€€€€¥¹Ðüµ…Ñ €ô¹Õ±°ì(€€€€€€€™½È€¡Ù…ÈÉ½Ü€ô€ÈìÉ½Ü€ðô±…ÍÑI½ÜìÉ½Ü¬¬¤(€€€€€€€ì(€€€€€€€€€€€¥˜€ …I½Ý5…Ñ¡•Ì¡Ý½É­Í¡••Ð°É½Ü°…ÁÁ±¥…Ñ¥½¸¤¤½¹Ñ¥¹Õ”ì(€€€€€€€€€€€¥˜€¡µ…Ñ ¥Ì¹½Ð¹Õ±°¤É•ÑÕÉ¸¹Õ±°ì(€€€€€€€€€€€µ…Ñ €ôÉ½Üì(€€€€€€€ô(€€€€€€€É•ÑÕÉ¸µ…Ñ ì(€€€ô((€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥Œ‰½½°I½Ý5…Ñ¡•Ì¡%a1]½É­Í¡••ÐÝ½É­Í¡••Ð°¥¹ÐÉ½Ü°%¹Ù½¥•ÁÁ±¥…Ñ¥½¸…ÁÁ±¥…Ñ¥½¸¤(€€€ì(€€€€€€€¥˜€ …ÍÑÉ¥¹œ¹ÅÕ…±Ì¡Ý½É­Í¡••Ð¹•±°¡É½Ü°€È¤¹•ÑMÑÉ¥¹œ ¤¹QÉ¥´ ¤°…ÁÁ±¥…Ñ¥½¸¹½µÁ…¹å9…µ”¹QÉ¥´ ¤°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤¤É•ÑÕÉ¸™…±Í”ì(€€€€€€€¥˜€ …ÍÑÉ¥¹œ¹ÅÕ…±Ì¡Ý½É­Í¡••Ð¹•±°¡É½Ü°€Ì¤¹•ÑMÑÉ¥¹œ ¤¹QÉ¥´ ¤°…ÁÁ±¥…Ñ¥½¸¹É•‘¥Ñ½‘”¹QÉ¥´ ¤°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤¤É•ÑÕÉ¸™…±Í”ì(€€€€€€€¥˜€ …‘•¥µ…°¹QÉåA…ÉÍ”¡Ý½É­Í¡••Ð¹•±°¡É½Ü°€Ð¤¹•ÑMÑÉ¥¹œ ¤°½ÕÐÙ…È…µ½Õ¹Ð¤ñð…µ½Õ¹Ð€„ô…ÁÁ±¥…Ñ¥½¸¹µ½Õ¹Ð¤É•ÑÕÉ¸™…±Í”ì(€€€€€€€É•ÑÕÉ¸ÍÑÉ¥¹œ¹ÅÕ…±Ì¡Ý½É­Í¡••Ð¹•±°¡É½Ü°€Ø¤¹•ÑMÑÉ¥¹œ ¤¹QÉ¥´ ¤°…ÁÁ±¥…Ñ¥½¸¹µ…¥°¹QÉ¥´ ¤°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…±%¹½É•…Í”¤ì(€€€ô((€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥ŒÙ½¥½ÁåI½ÝMÑå±”¡%a1]½É­Í¡••ÐÝÌ°¥¹ÐÍ½ÕÉ•I½Ü°¥¹ÐÑ…É•ÑI½Ü¤(€€€ì(€€€€€€€™½È€¡Ù…È½°€ô€Äì½°€ðô€àì½°¬¬¤(€€€€€€€€€€€ÝÌ¹•±°¡Ñ…É•ÑI½Ü°½°¤¹MÑå±”€ôÝÌ¹•±°¡Í½ÕÉ•I½Ü°½°¤¹MÑå±”ì(€€€€€€€ÝÌ¹I½Ü¡Ñ…É•ÑI½Ü¤¹!•¥¡Ð€ôÝÌ¹I½Ü¡Í½ÕÉ•I½Ü¤¹!•¥¡Ðì(€€€ô((€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥Œ…Ñ•Q¥µ”ü¥¹‘AÉ•Ù¥½ÕÍÁÁ±¥…Ñ¥½¹…Ñ”¡%a1]½É­Í¡••ÐÝÌ°¥¹ÐÉ½Ü°¥¹Ð…ÍÍÕµ•‘e•…È¤(€€€ì(€€€€€€€™½È€¡Ù…ÈÕÉÉ•¹Ð€ôÉ½ÜìÕÉÉ•¹Ð€øô€ÈìÕÉÉ•¹Ð´´¤(€€€€€€€ì(€€€€€€€€€€€Ù…ÈÑ•áÐ€ôÝÌ¹•±°¡ÕÉÉ•¹Ð°€Ä¤¹•ÑMÑÉ¥¹œ ¤¹QÉ¥´ ¤ì(€€€€€€€€€€€¥˜€¡ÍÑÉ¥¹œ¹%Í9Õ±±=É]¡¥Ñ•MÁ…”¡Ñ•áÐ¤¤½¹Ñ¥¹Õ”ì(€€€€€€€€€€€Ù…ÈÁ…ÉÑÌ€ôÑ•áÐ¹MÁ±¥Ð œ¸œ¤ì(€€€€€€€€€€€¥˜€¡Á…ÉÑÌ¹1•¹Ñ €ôô€È€˜˜¥¹Ð¹QÉåA…ÉÍ”¡Á…ÉÑÍlÁt°½ÕÐÙ…Èµ½¹Ñ ¤€˜˜¥¹Ð¹QÉåA…ÉÍ”¡Á…ÉÑÍlÅt°½ÕÐÙ…È‘…ä¤¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€ÑÉäìÉ•ÑÕÉ¸¹•Ü…Ñ•Q¥µ”¡…ÍÍÕµ•‘e•…È°µ½¹Ñ °‘…ä¤ìô(€€€€€€€€€€€€€€€…Ñ €¡ÉÕµ•¹Ñ=ÕÑ=™I…¹•á•ÁÑ¥½¸¤ìÉ•ÑÕÉ¸¹Õ±°ìô(€€€€€€€€€€€ô(€€€€€€€ô(€€€€€€€É•ÑÕÉ¸¹Õ±°ì(€€€ô((€€€ÁÉ¥Ù…Ñ”Í•…±•É•½ÉAÉ•Í•ÉÙ•‘]½É­Í¡••ÑA…ÉÑÌ (€€€€€€€a±•µ•¹ÐüM¡••ÑAÉ½Á•ÉÑ¥•Ì°(€€€€€€€a±•µ•¹ÐüM¡••Ñ½Éµ…ÑAÉ½Á•ÉÑ¥•Ì°(€€€€€€€a±•µ•¹ÐüÉ••é•A…¹”°(€€€€€€€a±•µ•¹ÐüAÉ¥¹Ñ=ÁÑ¥½¹Ì°(€€€€€€€a±•µ•¹ÐüA…•5…É¥¹Ì°(€€€€€€€a±•µ•¹ÐüA…•M•ÑÕÀ°(€€€€€€€a±•µ•¹Ðü!•…‘•É½½Ñ•È°(€€€€€€€a±•µ•¹ÐüI½Ý	É•…­Ì°(€€€€€€€a±•µ•¹Ðü½±Õµ¹	É•…­Ì¤ì((€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥ŒAÉ•Í•ÉÙ•‘]½É­Í¡••ÑA…ÉÑÌI•…‘AÉ•Í•ÉÙ•‘]½É­Í¡••ÑA…ÉÑÌ¡ÍÑÉ¥¹œ™¥±•A…Ñ °ÍÑÉ¥¹œÝ½É­Í¡••Ñ9…µ”¤(€€€ì(€€€€€€€ÕÍ¥¹œÙ…È…É¡¥Ù”€ôi¥Á¥±”¹=Á•¹I•…¡™¥±•A…Ñ ¤ì(€€€€€€€Ù…ÈÝ½É­Í¡••ÑA…Ñ €ôI•Í½±Ù•]½É­Í¡••ÑA…Ñ ¡…É¡¥Ù”°Ý½É­Í¡••Ñ9…µ”¤ì(€€€€€€€ÕÍ¥¹œÙ…ÈÍÑÉ•…´€ô…É¡¥Ù”¹•Ñ¹ÑÉä¡Ý½É­Í¡••ÑA…Ñ ¤ü¹=Á•¸ ¤ì(€€€€€€€¥˜€¡ÍÑÉ•…´¥Ì¹Õ±°¤Ñ¡É½Ü¹•Ü%¹Ù…±¥‘…Ñ…á•ÁÑ¥½¸ ‹–Þ—’ös¢† a50ƒ’â7–¶c–r£¾òiíÝ½É­Í¡••Ñ9…µ•ôˆ¤ì(€€€€€€€Ù…È‘½Õµ•¹Ð€ôa½Õµ•¹Ð¹1½…¡ÍÑÉ•…´¤ì(€€€€€€€a9…µ•ÍÁ…”ÍÁÉ•…‘Í¡••Ð€ô€‰¡ÑÑÀè¼½Í¡•µ…Ì¹½Á•¹áµ±™½Éµ…ÑÌ¹½Éœ½ÍÁÉ•…‘Í¡••Ñµ°¼ÈÀÀØ½µ…¥¸ˆì(€€€€€€€Ù…ÈÉ½½Ð€ô‘½Õµ•¹Ð¹I½½Ð€üüÑ¡É½Ü¹•Ü%¹Ù…±¥‘…Ñ…á•ÁÑ¥½¸ ‹–Þ—’ös¢† a50ƒš^ƒš‚ç¢*ž
-ç¾òiíÝ½É­Í¡••Ñ9…µ•ôˆ¤ì(€€€€€€€Ù…ÈÍ¡••ÑY¥•Ü€ôÉ½½Ð¹±•µ•¹Ð¡ÍÁÉ•…‘Í¡••Ð€¬€‰Í¡••ÑY¥•ÝÌˆ¤ü¹±•µ•¹ÑÌ¡ÍÁÉ•…‘Í¡••Ð€¬€‰Í¡••ÑY¥•Üˆ¤¹¥ÉÍÑ=É•™…Õ±Ð ¤ì(€€€€€€€É•ÑÕÉ¸¹•ÜAÉ•Í•ÉÙ•‘]½É­Í¡••ÑA…ÉÑÌ (€€€€€€€€€€€±½¹•±•µ•¹Ð¡É½½Ð¹±•µ•¹Ð¡ÍÁÉ•…‘Í¡••Ð€¬€‰Í¡••ÑAÈˆ¤¤°(€€€€€€€€€€€±½¹•±•µ•¹Ð¡É½½Ð¹±•µ•¹Ð¡ÍÁÉ•…‘Í¡••Ð€¬€‰Í¡••Ñ½Éµ…ÑAÈˆ¤¤°(€€€€€€€€€€€±½¹•±•µ•¹Ð¡Í¡••ÑY¥•Üü¹±•µ•¹Ð¡ÍÁÉ•…‘Í¡••Ð€¬€‰Á…¹”ˆ¤¤°(€€€€€€€€€€€±½¹•±•µ•¹Ð¡É½½Ð¹±•µ•¹Ð¡ÍÁÉ•…‘Í¡••Ð€¬€‰ÁÉ¥¹Ñ=ÁÑ¥½¹Ìˆ¤¤°(€€€€€€€€€€€±½¹•±•µ•¹Ð¡É½½Ð¹±•µ•¹Ð¡ÍÁÉ•…‘Í¡••Ð€¬€‰Á…•5…É¥¹Ìˆ¤¤°(€€€€€€€€€€€±½¹•±•µ•¹Ð¡É½½Ð¹±•µ•¹Ð¡ÍÁÉ•…‘Í¡••Ð€¬€‰Á…•M•ÑÕÀˆ¤¤°(€€€€€€€€€€€±½¹•±•µ•¹Ð¡É½½Ð¹±•µ•¹Ð¡ÍÁÉ•…‘Í¡••Ð€¬€‰¡•…‘•É½½Ñ•Èˆ¤¤°(€€€€€€€€€€€±½¹•±•µ•¹Ð¡É½½Ð¹±•µ•¹Ð¡ÍÁÉ•…‘Í¡••Ð€¬€‰É½Ý	É•…­Ìˆ¤¤°(€€€€€€€€€€€±½¹•±•µ•¹Ð¡É½½Ð¹±•µ•¹Ð¡ÍÁÉ•…‘Í¡••Ð€¬€‰½±	É•…­Ìˆ¤¤¤ì(€€€ô((€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥ŒÙ½¥I•ÍÑ½É•AÉ•Í•ÉÙ•‘]½É­Í¡••ÑA…ÉÑÌ¡ÍÑÉ¥¹œ™¥±•A…Ñ °ÍÑÉ¥¹œÝ½É­Í¡••Ñ9…µ”°AÉ•Í•ÉÙ•‘]½É­Í¡••ÑA…ÉÑÌ½É¥¥¹…±A…ÉÑÌ¤(€€€ì(€€€€€€€ÕÍ¥¹œÙ…È…É¡¥Ù”€ôi¥Á¥±”¹=Á•¸¡™¥±•A…Ñ °i¥ÁÉ¡¥Ù•5½‘”¹UÁ‘…Ñ”¤ì(€€€€€€€Ù…ÈÝ½É­Í¡••ÑA…Ñ €ôI•Í½±Ù•]½É­Í¡••ÑA…Ñ ¡…É¡¥Ù”°Ý½É­Í¡••Ñ9…µ”¤ì(€€€€€€€Ù…È•¹ÑÉä€ô…É¡¥Ù”¹•Ñ¹ÑÉä¡Ý½É­Í¡••ÑA…Ñ ¤€üüÑ¡É½Ü¹•Ü%¹Ù…±¥‘…Ñ…á•ÁÑ¥½¸ ‹–Þ—’ös¢† a50ƒ’â7–¶c–r£¾òiíÝ½É­Í¡••Ñ9…µ•ôˆ¤ì(€€€€€€€a½Õµ•¹Ð‘½Õµ•¹Ðì(€€€€€€€ÕÍ¥¹œ€¡Ù…ÈÍÑÉ•…´€ô•¹ÑÉä¹=Á•¸ ¤¤‘½Õµ•¹Ð€ôa½Õµ•¹Ð¹1½…¡ÍÑÉ•…´¤ì((€€€€€€€a9…µ•ÍÁ…”ÍÁÉ•…‘Í¡••Ð€ô€‰¡ÑÑÀè¼½Í¡•µ…Ì¹½Á•¹áµ±™½Éµ…ÑÌ¹½Éœ½ÍÁÉ•…‘Í¡••Ñµ°¼ÈÀÀØ½µ…¥¸ˆì(€€€€€€€Ù…ÈÉ½½Ð€ô‘½Õµ•¹Ð¹I½½Ð€üüÑ¡É½Ü¹•Ü%¹Ù…±¥‘…Ñ…á•ÁÑ¥½¸ ‹–Þ—’ös¢† a50ƒš^ƒš‚ç¢*ž
-ç¾òiíÝ½É­Í¡••Ñ9…µ•ôˆ¤ì(€€€€€€€I•Á±…•¡¥±¡É½½Ð°ÍÁÉ•…‘Í¡••Ð€¬€‰Í¡••ÑAÈˆ°½É¥¥¹…±A…ÉÑÌ¹M¡••ÑAÉ½Á•ÉÑ¥•Ì¤ì(€€€€€€€I•Á±…•¡¥±¡É½½Ð°ÍÁÉ•…‘Í¡••Ð€¬€‰Í¡••Ñ½Éµ…ÑAÈˆ°½É¥¥¹…±A…ÉÑÌ¹M¡••Ñ½Éµ…ÑAÉ½Á•ÉÑ¥•Ì¤ì(€€€€€€€Ù…ÈÍ¡••ÑY¥•Ü€ô‘½Õµ•¹Ð¹I½½Ðü¹±•µ•¹Ð¡ÍÁÉ•…‘Í¡••Ð€¬€‰Í¡••ÑY¥•ÝÌˆ¤ü¹±•µ•¹ÑÌ¡ÍÁÉ•…‘Í¡••Ð€¬€‰Í¡••ÑY¥•Üˆ¤¹¥ÉÍÑ=É•™…Õ±Ð ¤ì(€€€€€€€¥˜€¡Í¡••ÑY¥•Ü¥Ì¹½Ð¹Õ±°¤(€€€€€€€ì(€€€€€€€€€€€I•Á±…•¡¥±¡Í¡••ÑY¥•Ü°ÍÁÉ•…‘Í¡••Ð€¬€‰Á…¹”ˆ°½É¥¥¹…±A…ÉÑÌ¹É••é•A…¹”¤ì(€€€€€€€ô((€€€€€€€I•Á±…•¡¥±¡É½½Ð°ÍÁÉ•…‘Í¡••Ð€¬€‰ÁÉ¥¹Ñ=ÁÑ¥½¹Ìˆ°½É¥¥¹…±A…ÉÑÌ¹AÉ¥¹Ñ=ÁÑ¥½¹Ì¤ì(€€€€€€€I•Á±…•¡¥±¡É½½Ð°ÍÁÉ•…‘Í¡••Ð€¬€‰Á…•5…É¥¹Ìˆ°½É¥¥¹…±A…ÉÑÌ¹A…•5…É¥¹Ì¤ì(€€€€€€€I•Á±…•¡¥±¡É½½Ð°ÍÁÉ•…‘Í¡••Ð€¬€‰Á…•M•ÑÕÀˆ°½É¥¥¹…±A…ÉÑÌ¹A…•M•ÑÕÀ¤ì(€€€€€€€I•Á±…•¡¥±¡É½½Ð°ÍÁÉ•…‘Í¡••Ð€¬€‰¡•…‘•É½½Ñ•Èˆ°½É¥¥¹…±A…ÉÑÌ¹!•…‘•É½½Ñ•È¤ì(€€€€€€€I•Á±…•¡¥±¡É½½Ð°ÍÁÉ•…‘Í¡••Ð€¬€‰É½Ý	É•…­Ìˆ°½É¥¥¹…±A…ÉÑÌ¹I½Ý	É•…­Ì¤ì(€€€€€€€I•Á±…•¡¥±¡É½½Ð°ÍÁÉ•…‘Í¡••Ð€¬€‰½±	É•…­Ìˆ°½É¥¥¹…±A…ÉÑÌ¹½±Õµ¹	É•…­Ì¤ì((€€€€€€€•¹ÑÉä¹•±•Ñ” ¤ì(€€€€€€€Ù…ÈÉ•Á±…•µ•¹Ð€ô…É¡¥Ù”¹É•…Ñ•¹ÑÉä¡Ý½É­Í¡••ÑA…Ñ °½µÁÉ•ÍÍ¥½¹1•Ù•°¹=ÁÑ¥µ…°¤ì(€€€€€€€ÕÍ¥¹œÙ…È½ÕÑÁÕÐ€ôÉ•Á±…•µ•¹Ð¹=Á•¸ ¤ì(€€€€€€€‘½Õµ•¹Ð¹M…Ù”¡½ÕÑÁÕÐ°MåÍÑ•´¹aµ°¹1¥¹Ä¹M…Ù•=ÁÑ¥½¹Ì¹¥Í…‰±•½Éµ…ÑÑ¥¹œ¤ì(€€€ô((€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥Œa±•µ•¹Ðü±½¹•±•µ•¹Ð¡a±•µ•¹Ðü•±•µ•¹Ð¤€ôø•±•µ•¹Ð¥Ì¹Õ±°€ü¹Õ±°€è¹•Üa±•µ•¹Ð¡•±•µ•¹Ð¤ì((€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥ŒÙ½¥I•Á±…•¡¥±¡a±•µ•¹ÐÁ…É•¹Ð°a9…µ”¹…µ”°a±•µ•¹Ðü½É¥¥¹…°¤(€€€ì(€€€€€€€Ù…ÈÕÉÉ•¹Ð€ôÁ…É•¹Ð¹±•µ•¹Ð¡¹…µ”¤ì(€€€€€€€¥˜€¡ÕÉÉ•¹Ð¥Ì¹½Ð¹Õ±°¤(€€€€€€€ì(€€€€€€€€€€€¥˜€¡½É¥¥¹…°¥Ì¹Õ±°¤ÕÉÉ•¹Ð¹I•µ½Ù” ¤ì(€€€€€€€€€€€•±Í”ÕÉÉ•¹Ð¹I•Á±…•]¥Ñ ¡¹•Üa±•µ•¹Ð¡½É¥¥¹…°¤¤ì(€€€€€€€ô(€€€€€€€•±Í”¥˜€¡½É¥¥¹…°¥Ì¹½Ð¹Õ±°¤(€€€€€€€ì(€€€€€€€€€€€Á…É•¹Ð¹‘¡¹•Üa±•µ•¹Ð¡½É¥¥¹…°¤¤ì(€€€€€€€ô(€€€ô((€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥ŒÍÑÉ¥¹œI•Í½±Ù•]½É­Í¡••ÑA…Ñ ¡i¥ÁÉ¡¥Ù”…É¡¥Ù”°ÍÑÉ¥¹œÝ½É­Í¡••Ñ9…µ”¤(€€€ì(€€€€€€€a9…µ•ÍÁ…”ÍÁÉ•…‘Í¡••Ð€ô€‰¡ÑÑÀè¼½Í¡•µ…Ì¹½Á•¹áµ±™½Éµ…ÑÌ¹½Éœ½ÍÁÉ•…‘Í¡••Ñµ°¼ÈÀÀØ½µ…¥¸ˆì(€€€€€€€a9…µ•ÍÁ…”½™™¥•I•±…Ñ¥½¹Í¡¥ÁÌ€ô€‰¡ÑÑÀè¼½Í¡•µ…Ì¹½Á•¹áµ±™½Éµ…ÑÌ¹½Éœ½½™™¥•½Õµ•¹Ð¼ÈÀÀØ½É•±…Ñ¥½¹Í¡¥ÁÌˆì(€€€€€€€a9…µ•ÍÁ…”Á…­…•I•±…Ñ¥½¹Í¡¥ÁÌ€ô€‰¡ÑÑÀè¼½Í¡•µ…Ì¹½Á•¹áµ±™½Éµ…ÑÌ¹½Éœ½Á…­…”¼ÈÀÀØ½É•±…Ñ¥½¹Í¡¥ÁÌˆì(€€€€€€€Ù…ÈÝ½É­‰½½¬€ô1½…‘aµ±¹ÑÉä¡…É¡¥Ù”°€‰á°½Ý½É­‰½½¬¹áµ°ˆ¤ì(€€€€€€€Ù…ÈÉ•±…Ñ¥½¹Í¡¥ÁÌ€ô1½…‘aµ±¹ÑÉä¡…É¡¥Ù”°€‰á°½}É•±Ì½Ý½É­‰½½¬¹áµ°¹É•±Ìˆ¤ì(€€€€€€€Ù…ÈÍ¡••Ð€ôÝ½É­‰½½¬¹I½½Ðü¹±•µ•¹Ð¡ÍÁÉ•…‘Í¡••Ð€¬€‰Í¡••ÑÌˆ¤ü¹±•µ•¹ÑÌ¡ÍÁÉ•…‘Í¡••Ð€¬€‰Í¡••Ðˆ¤¹M¥¹±•=É•™…Õ±Ð¡à€ôøà¹ÑÑÉ¥‰ÕÑ” ‰¹…µ”ˆ¤ü¹Y…±Õ”€ôôÝ½É­Í¡••Ñ9…µ”¤(€€€€€€€€€€€€üüÑ¡É½Ü¹•Ü%¹Ù…±¥‘=Á•É…Ñ¥½¹á•ÁÑ¥½¸ ‹–Þ—’ös¢†£’â7–¶c–r£¾òiíÝ½É­Í¡••Ñ9…µ•ôˆ¤ì(€€€€€€€Ù…ÈÉ•±…Ñ¥½¹Í¡¥Á%€ôÍ¡••Ð¹ÑÑÉ¥‰ÕÑ”¡½™™¥•I•±…Ñ¥½¹Í¡¥ÁÌ€¬€‰¥ˆ¤ü¹Y…±Õ”(€€€€€€€€€€€€üüÑ¡É½Ü¹•Ü%¹Ù…±¥‘…Ñ…á•ÁÑ¥½¸ ‹–Þ—’ös¢†£–ÏžÎï’â7–¶c–r£¾òiíÝ½É­Í¡••Ñ9…µ•ôˆ¤ì(€€€€€€€Ù…ÈÑ…É•Ð€ôÉ•±…Ñ¥½¹Í¡¥ÁÌ¹I½½Ðü¹±•µ•¹ÑÌ¡Á…­…•I•±…Ñ¥½¹Í¡¥ÁÌ€¬€‰I•±…Ñ¥½¹Í¡¥Àˆ¤¹M¥¹±•=É•™…Õ±Ð¡à€ôøà¹ÑÑÉ¥‰ÕÑ” ‰%ˆ¤ü¹Y…±Õ”€ôôÉ•±…Ñ¥½¹Í¡¥Á%¤ü¹ÑÑÉ¥‰ÕÑ” ‰Q…É•Ðˆ¤ü¹Y…±Õ”(€€€€€€€€€€€€üüÑ¡É½Ü¹•Ü%¹Ù…±¥‘…Ñ…á•ÁÑ¥½¸ ‹–Þ—’ös¢†£žn»š‚’â7–¶c–r£¾òiíÝ½É­Í¡••Ñ9…µ•ôˆ¤ì(€€€€€€€Ñ…É•Ð€ôÑ…É•Ð¹I•Á±…” qpœ°€œ¼œ¤ì(€€€€€€€¥˜€¡Ñ…É•Ð¹MÑ…ÉÑÍ]¥Ñ  ˆ¼ˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤¤É•ÑÕÉ¸Ñ…É•Ð¹QÉ¥µMÑ…ÉÐ œ¼œ¤ì(€€€€€€€¥˜€¡Ñ…É•Ð¹MÑ…ÉÑÍ]¥Ñ  ˆ¸¸¼ˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤¤É•ÑÕÉ¸€‰á°¼ˆ€¬Ñ…É•ÑlÌ¸¹tì(€€€€€€€É•ÑÕÉ¸€‰á°¼ˆ€¬Ñ…É•Ð¹QÉ¥µMÑ…ÉÐ œ¼œ¤ì(€€€ô((€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥Œa½Õµ•¹Ð1½…‘aµ±¹ÑÉä¡i¥ÁÉ¡¥Ù”…É¡¥Ù”°ÍÑÉ¥¹œÁ…Ñ ¤(€€€ì(€€€€€€€Ù…È•¹ÑÉä€ô…É¡¥Ù”¹•Ñ¹ÑÉä¡Á…Ñ ¤€üüÑ¡É½Ü¹•Ü%¹Ù…±¥‘…Ñ…á•ÁÑ¥½¸ ‰á•°ƒšZ’îÛžòë–ÂDa50ƒ¦£’îÛ¾òiíÁ…Ñ¡ôˆ¤ì(€€€€€€€ÕÍ¥¹œÙ…ÈÍÑÉ•…´€ô•¹ÑÉä¹=Á•¸ ¤ì(€€€€€€€É•ÑÕÉ¸a½Õµ•¹Ð¹1½…¡ÍÑÉ•…´¤ì(€€€ô)ô()ÁÕ‰±¥ŒÍ•…±•±…ÍÌÁ…Á¥É•‘•¹Ñ¥…±MÑ½É”¡ÍÑÉ¥¹œ‘¥É•Ñ½Éä¤)ì(€€€ÁÕ‰±¥Œ…Íå¹ŒQ…Í¬M…Ù•Íå¹Œ¡ÍÑÉ¥¹œ…½Õ¹Ð°ÍÑÉ¥¹œÁ…ÍÍÝ½É°…¹•±±…Ñ¥½¹Q½­•¸…¹•±±…Ñ¥½¹Q½­•¸€ô‘•™…Õ±Ð¤(€€€ì(€€€€€€€¥É•Ñ½Éä¹É•…Ñ•¥É•Ñ½Éä¡‘¥É•Ñ½Éä¤ì(€€€€€€€Ù…È¥Á¡•È€ôAÉ½Ñ•Ñ•‘…Ñ„¹AÉ½Ñ•Ð¡¹½‘¥¹œ¹UQà¹•Ñ	åÑ•Ì¡Á…ÍÍÝ½É¤°¹ÑÉ½Áä¡…½Õ¹Ð¤°…Ñ…AÉ½Ñ•Ñ¥½¹M½Á”¹ÕÉÉ•¹ÑUÍ•È¤ì(€€€€€€€Ù…ÈÁ…Ñ €ôA…Ñ¡½È¡…½Õ¹Ð¤ì(€€€€€€€Ù…ÈÑ•µÁA…Ñ €ôA…Ñ ¹½µ‰¥¹”¡‘¥É•Ñ½Éä°€ˆ¹íA…Ñ ¹•Ñ¥±•9…µ”¡Á…Ñ ¥ô¹íÕ¥¹9•ÝÕ¥ ¤é9ô¹ÑµÀˆ¤ì(€€€€€€€ÑÉä(€€€€€€€ì(€€€€€€€€€€€…Ý…¥Ð¥±”¹]É¥Ñ•±±	åÑ•ÍÍå¹Œ¡Ñ•µÁA…Ñ °¥Á¡•È°…¹•±±…Ñ¥½¹Q½­•¸¤ì(€€€€€€€€€€€ÕÍ¥¹œ€¡Ù…È‘ÕÉ…‰±”€ô¹•Ü¥±•MÑÉ•…´¡Ñ•µÁA…Ñ °¥±•5½‘”¹=Á•¸°¥±••ÍÌ¹I•…‘]É¥Ñ”°¥±•M¡…É”¹I•…¤¤(€€€€€€€€€€€€€€€‘ÕÉ…‰±”¹±ÕÍ ¡ÑÉÕ”¤ì((€€€€€€€€€€€¥˜€¡¥±”¹á¥ÍÑÌ¡Á…Ñ ¤¤¥±”¹I•Á±…”¡Ñ•µÁA…Ñ °Á…Ñ °¹Õ±°°ÑÉÕ”¤ì(€€€€€€€€€€€•±Í”¥±”¹5½Ù”¡Ñ•µÁA…Ñ °Á…Ñ ¤ì(€€€€€€€ô(€€€€€€€™¥¹…±±ä(€€€€€€€ì(€€€€€€€€€€€¥˜€¡¥±”¹á¥ÍÑÌ¡Ñ•µÁA…Ñ ¤¤¥±”¹•±•Ñ”¡Ñ•µÁA…Ñ ¤ì(€€€€€€€ô(€€€ô((€€€ÁÕ‰±¥Œ…Íå¹ŒQ…Í¬ñÍÑÉ¥¹œüø1½…‘Íå¹Œ¡ÍÑÉ¥¹œ…½Õ¹Ð°…¹•±±…Ñ¥½¹Q½­•¸…¹•±±…Ñ¥½¹Q½­•¸€ô‘•™…Õ±Ð¤(€€€ì(€€€€€€€Ù…ÈÁ…Ñ €ôA…Ñ¡½È¡…½Õ¹Ð¤ì(€€€€€€€¥˜€ …¥±”¹á¥ÍÑÌ¡Á…Ñ ¤¤É•ÑÕÉ¸¹Õ±°ì(€€€€€€€Ù…È¥Á¡•È€ô…Ý…¥Ð¥±”¹I•…‘±±	åÑ•ÍÍå¹Œ¡Á…Ñ °…¹•±±…Ñ¥½¹Q½­•¸¤ì(€€€€€€€Ù…È±•…È€ôAÉ½Ñ•Ñ•‘…Ñ„¹U¹ÁÉ½Ñ•Ð¡¥Á¡•È°¹ÑÉ½Áä¡…½Õ¹Ð¤°…Ñ…AÉ½Ñ•Ñ¥½¹M½Á”¹ÕÉÉ•¹ÑUÍ•È¤ì(€€€€€€€É•ÑÕÉ¸¹½‘¥¹œ¹UQà¹•ÑMÑÉ¥¹œ¡±•…È¤ì(€€€ô((€€€ÁÕ‰±¥ŒQ…Í¬•±•Ñ•Íå¹Œ¡ÍÑÉ¥¹œ…½Õ¹Ð°…¹•±±…Ñ¥½¹Q½­•¸…¹•±±…Ñ¥½¹Q½­•¸€ô‘•™…Õ±Ð¤(€€€ì(€€€€€€€…¹•±±…Ñ¥½¹Q½­•¸¹Q¡É½Ý%™…¹•±±…Ñ¥½¹I•ÅÕ•ÍÑ• ¤ì(€€€€€€€Ù…ÈÁ…Ñ €ôA…Ñ¡½È¡…½Õ¹Ð¤ì(€€€€€€€¥˜€¡¥±”¹á¥ÍÑÌ¡Á…Ñ ¤¤¥±”¹•±•Ñ”¡Á…Ñ ¤ì(€€€€€€€É•ÑÕÉ¸Q…Í¬¹½µÁ±•Ñ•‘Q…Í¬ì(€€€ô((€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥Œ‰åÑ•mt¹ÑÉ½Áä¡ÍÑÉ¥¹œ…½Õ¹Ð¤€ôøM!ÈÔØ¹!…Í¡…Ñ„¡¹½‘¥¹œ¹UQà¹•Ñ	åÑ•Ì ‰%¹Ù½¥•5…¥±ÍÍ¥ÍÑ…¹Ññí…½Õ¹Ð¹QÉ¥´ ¤¹Q½1½Ý•É%¹Ù…É¥…¹Ð ¥ôˆ¤¤ì(€€€ÁÉ¥Ù…Ñ”ÍÑÉ¥¹œA…Ñ¡½È¡ÍÑÉ¥¹œ…½Õ¹Ð¤€ôøA…Ñ ¹½µ‰¥¹”¡‘¥É•Ñ½Éä°½¹Ù•ÉÐ¹Q½!•áMÑÉ¥¹œ¡M!ÈÔØ¹!…Í¡…Ñ„¡¹½‘¥¹œ¹UQà¹•Ñ	åÑ•Ì¡…½Õ¹Ð¹QÉ¥´ ¤¹Q½1½Ý•É%¹Ù…É¥…¹Ð ¤¤¤¤€¬€ˆ¹É•ˆ¤ì)ô()ÁÕ‰±¥ŒÍÑ…Ñ¥Œ±…ÍÌMÑ…ÉÑÕÁ5…¹…•È)ì(€€€ÁÉ¥Ù…Ñ”½¹ÍÐÍÑÉ¥¹œIÕ¹-•ä€ô€‰M½™ÑÝ…É•qq5¥É½Í½™Ñqq]¥¹‘½ÝÍqqÕÉÉ•¹ÑY•ÉÍ¥½¹qqIÕ¸ˆì(€€€ÁÉ¥Ù…Ñ”½¹ÍÐÍÑÉ¥¹œY…±Õ•9…µ”€ô€‰%¹Ù½¥•5…¥±ÍÍ¥ÍÑ…¹Ðˆì((€€€ÁÕ‰±¥ŒÍÑ…Ñ¥ŒÙ½¥M•Ñ¹…‰±•¡‰½½°•¹…‰±•¤(€€€ì(€€€€€€€ÑÉä(€€€€€€€ì(€€€€€€€€€€€ÕÍ¥¹œÙ…È­•ä€ôI•¥ÍÑÉä¹ÕÉÉ•¹ÑUÍ•È¹É•…Ñ•MÕ‰-•ä¡IÕ¹-•ä°ÑÉÕ”¤(€€€€€€€€€€€€€€€€üüÑ¡É½Ü¹•Ü%¹Ù…±¥‘=Á•É…Ñ¥½¹á•ÁÑ¥½¸ ‹š^ƒšÎWš&O–ò–öO–&7žR£š"ßžj–òšrë–B¿–*£šÎ£–3¢†£¦†çŽˆ¤ì(€€€€€€€€€€€¥˜€ …•¹…‰±•¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€­•ä¹•±•Ñ•Y…±Õ”¡Y…±Õ•9…µ”°™…±Í”¤ì(€€€€€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€€€€€ô((€€€€€€€€€€€Ù…ÈÁÉ½•ÍÍA…Ñ €ô¹Ù¥É½¹µ•¹Ð¹AÉ½•ÍÍA…Ñ ì(€€€€€€€€€€€¥˜€¡ÍÑÉ¥¹œ¹%Í9Õ±±=É]¡¥Ñ•MÁ…”¡ÁÉ½•ÍÍA…Ñ ¤¤Ñ¡É½Ü¹•Ü%¹Ù…±¥‘=Á•É…Ñ¥½¹á•ÁÑ¥½¸ ‹š^ƒšÎWž†»–ºkž¢/–ê?¢Þ¿–úŽˆ¤ì(€€€€€€€€€€€­•ä¹M•ÑY…±Õ”¡Y…±Õ•9…µ”°€‰p‰íÁÉ½•ÍÍA…Ñ¡õpˆˆ¤ì(€€€€€€€ô(€€€€€€€…Ñ €¡á•ÁÑ¥½¸•à¤Ý¡•¸€¡•à¥ÌU¹…ÕÑ¡½É¥é•‘•ÍÍá•ÁÑ¥½¸½ÈM•ÕÉ¥Ñåá•ÁÑ¥½¸½È%=á•ÁÑ¥½¸¤(€€€€€€€ì(€€€€€€€€€€€Ñ¡É½Ü¹•Ü%¹Ù…±¥‘=Á•É…Ñ¥½¹á•ÁÑ¥½¸ ‹–òšrë–B¿–*£¢ºûžö»–’Ç¢Ò—Žˆ°•à¤ì(€€€€€€€ô(€€€ô)ô
+    public async Task<long?> TryInsertAsync(InvoiceApplication app, string fallbackHash, CancellationToken cancellationToken = default)
+    {
+        var legacyFallbackHash = app.ProcessingStatus == ProcessingStatus.Parsed
+            ? Deduplication.CreateLegacyFallbackHash(app)
+            : null;
+        if (await ExistsAnyAsync(app.MessageId, app.ImapUid, app.MailboxIdentity, app.MailboxName, app.UidValidity, fallbackHash, legacyFallbackHash, cancellationToken))
+            return null;
+
+        try
+        {
+            return await InsertAsync(app, fallbackHash, cancellationToken);
+        }
+        catch (SqliteException ex) when (IsUniqueConstraint(ex))
+        {
+            return null;
+        }
+    }
+
+    public async Task<long> InsertAsync(InvoiceApplication app, string fallbackHash, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO invoice_applications (
+                company_name, credit_code, amount, apply_time, invoice_type, recipient, phone, address, email, remark,
+                message_id, imap_uid, uid_validity, mailbox_name, mailbox_identity, mail_received_at, mail_subject, mail_from, normalized_body,
+                processing_status, excel_row, created_at, updated_at, error_message, fallback_hash)
+            VALUES ($company, $credit, $amount, $apply, $type, $recipient, $phone, $address, $email, $remark,
+                $messageId, $uid, $uidValidity, $mailboxName, $mailbox, $received, $subject, $from, $body, $status, $excelRow, $created, $updated, $error, $hash);
+            SELECT last_insert_rowid();
+            """;
+        AddParameters(command, app, fallbackHash);
+        var id = (long)(await command.ExecuteScalarAsync(cancellationToken) ?? 0L);
+        app.Id = id;
+        return id;
+    }
+
+    public async Task UpdateStatusAsync(long id, ProcessingStatus status, string? error = null, int? excelRow = null, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = "UPDATE invoice_applications SET processing_status=$status, error_message=$error, excel_row=COALESCE($row, excel_row), updated_at=$updated WHERE id=$id;";
+        command.Parameters.AddWithValue("$status", (int)status);
+        command.Parameters.AddWithValue("$error", error ?? string.Empty);
+        command.Parameters.AddWithValue("$row", (object?)excelRow ?? DBNull.Value);
+        command.Parameters.AddWithValue("$updated", DateTimeOffset.Now.ToString("O"));
+        command.Parameters.AddWithValue("$id", id);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<InvoiceApplication>> GetRecentAsync(int limit, CancellationToken cancellationToken = default)
+    {
+        var result = new List<InvoiceApplication>();
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT * FROM invoice_applications ORDER BY id DESC LIMIT $limit;";
+        command.Parameters.AddWithValue("$limit", limit);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) result.Add(Map(reader));
+        return result;
+    }
+
+    public async Task<IReadOnlyList<InvoiceApplication>> GetPendingExcelAsync(CancellationToken cancellationToken = default)
+    {
+        var result = new List<InvoiceApplication>();
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT * FROM invoice_applications WHERE processing_status IN (2, 5) ORDER BY id;";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) result.Add(Map(reader));
+        return result;
+    }
+
+    public async Task<IReadOnlyList<InvoiceApplication>> GetParseFailedAsync(CancellationToken cancellationToken = default)
+    {
+        var result = new List<InvoiceApplication>();
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT * FROM invoice_applications WHERE processing_status = $status ORDER BY id;";
+        command.Parameters.AddWithValue("$status", (int)ProcessingStatus.ParseFailed);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) result.Add(Map(reader));
+        return result;
+    }
+
+    public async Task UpdateParsedAsync(long id, InvoiceApplication app, string fallbackHash, CancellationToken cancellationToken = default)
+    {
+        await using var connection = awaitâ€¦1285 tokens truncatedâ€¦ring(r.GetOrdinal("normalized_body")),
+        ProcessingStatus = (ProcessingStatus)r.GetInt32(r.GetOrdinal("processing_status")),
+        ExcelRow = r.IsDBNull(r.GetOrdinal("excel_row")) ? null : r.GetInt32(r.GetOrdinal("excel_row")),
+        CreatedAt = DateTimeOffset.Parse(r.GetString(r.GetOrdinal("created_at"))),
+        UpdatedAt = DateTimeOffset.Parse(r.GetString(r.GetOrdinal("updated_at"))),
+        ErrorMessage = r.GetString(r.GetOrdinal("error_message"))
+    };
+
+    private static async Task EnsureColumnAsync(SqliteConnection connection, string name, string definition, CancellationToken cancellationToken)
+    {
+        var check = connection.CreateCommand();
+        check.CommandText = "PRAGMA table_info(invoice_applications);";
+        var exists = false;
+        await using (var reader = await check.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                if (string.Equals(reader.GetString(1), name, StringComparison.OrdinalIgnoreCase))
+                {
+                    exists = true;
+                    break;
+                }
+            }
+        }
+
+        if (!exists)
+        {
+            var alter = connection.CreateCommand();
+            alter.CommandText = $"ALTER TABLE invoice_applications ADD COLUMN {name} {definition};";
+            await alter.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
+
+    private static bool IsUniqueConstraint(SqliteException exception)
+        => exception.SqliteErrorCode == 19 || exception.Message.Contains("UNIQUE", StringComparison.OrdinalIgnoreCase);
+}
+
+public sealed class ExcelRowOccupiedException(string message) : Exception(message);
+
+public sealed class ExcelWriterLock : IDisposable
+{
+    private readonly Semaphore _semaphore;
+    private bool _released;
+
+    internal ExcelWriterLock(Semaphore semaphore) => _semaphore = semaphore;
+
+    public void Dispose()
+    {
+        if (_released) return;
+        _released = true;
+        _semaphore.Release();
+        _semaphore.Dispose();
+    }
+}
+
+public sealed class ExcelWriter
+{
+    private const string LockName = "Local\\InvoiceMailAssistant.ExcelWrite";
+
+    public async Task<ExcelWriterLock> AcquireWriteLockAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var semaphore = new Semaphore(1, 1, LockName);
+        var acquired = false;
+        try
+        {
+            acquired = await Task.Run(() => semaphore.WaitOne(TimeSpan.FromSeconds(30)), CancellationToken.None);
+            if (!acquired) throw new IOException("Excel å†™å…¥é”ç­‰å¾…è¶…æ—¶ï¼Œç”³è¯·å°†ä¿ç•™åœ¨ç­‰å¾…é˜Ÿåˆ—ã€‚");
+            cancellationToken.ThrowIfCancellationRequested();
+            return new ExcelWriterLock(semaphore);
+        }
+        catch
+        {
+            if (acquired) semaphore.Release();
+            semaphore.Dispose();
+            throw;
+        }
+    }
+
+    public int ResolveTargetRow(InvoiceApplication application, string filePath, string worksheetName)
+    {
+        EnsureWritable(filePath);
+        using var workbook = new XLWorkbook(filePath);
+        if (!workbook.Worksheets.TryGetWorksheet(worksheetName, out var worksheet))
+            throw new InvalidOperationException($"å·¥ä½œè¡¨ä¸å­˜åœ¨ï¼š{worksheetName}");
+
+        var lastUsed = worksheet.LastRowUsed()?.RowNumber() ?? 1;
+        if (application.ExcelRow is int plannedRow && plannedRow >= 2)
+        {
+            if (RowMatches(worksheet, plannedRow, application))
+                return plannedRow;
+            if (RowIsEmpty(worksheet, plannedRow))
+                return plannedRow;
+
+            // A user may have inserted rows above a previously planned row.
+            // Reuse a matching row only when it is unambiguous; otherwise keep
+            // the record pending instead of risking a different application.
+            var existingRow = FindMatchingRow(worksheet, application, Math.Max(lastUsed, plannedRow));
+            if (existingRow is not null) return existingRow.Value;
+        }
+
+        return Math.Max(lastUsed + 1, 2);
+    }
+
+    public async Task<int> WriteAsync(InvoiceApplication application, string filePath, string worksheetName, CancellationToken cancellationToken = default, ExcelWriterLock? writeLock = null)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ExcelWriterLock? ownedLock = null;
+        if (writeLock is null) ownedLock = await AcquireWriteLockAsync(cancellationToken);
+
+        var directory = Path.GetDirectoryName(filePath)!;
+        var tempPath = Path.Combine(directory, $".{Path.GetFileName(filePath)}.{Guid.NewGuid():N}.tmp.xlsx");
+
+        try
+        {
+            EnsureWritable(filePath);
+            var originalWorksheetParts = ReadPreservedWorksheetParts(filePath, worksheetName);
+            File.Copy(filePath, tempPath, true);
+            var row = application.ExcelRow ?? throw new InvalidOperationException("å°šæœªä¸º Excel å†™å…¥é¢„ç•™ç›®æ ‡è¡Œã€‚");
+            using (var workbook = new XLWorkbook(tempPath))
+            {
+                if (!workbook.Worksheets.TryGetWorksheet(worksheetName, out var worksheet))
+                    throw new InvalidOperationException($"å·¥ä½œè¡¨ä¸å­˜åœ¨ï¼š{worksheetName}");
+
+                if (RowMatches(worksheet, row, application))
+                    return row;
+
+                if (!RowIsEmpty(worksheet, row))
+                {
+                    var existingRow = FindMatchingRow(worksheet, application, Math.Max(row, worksheet.LastRowUsed()?.RowNumber() ?? row));
+                    if (existingRow is null)
+                        throw new ExcelRowOccupiedException($"Excel ç¬¬ {row} è¡Œå·²è¢«å…¶ä»–æ•°æ®å ç”¨ï¼Œè¯·é‡æ–°è§„åˆ’ç›®æ ‡è¡Œã€‚");
+                    row = existingRow.Value;
+                    application.ExcelRow = row;
+                }
+
+                if (RowMatches(worksheet, row, application))
+                    return row;
+
+                if (row > 2) CopyRowStyle(worksheet, row - 1, row);
+
+                var previousDate = FindPreviousApplicationDate(worksheet, row - 1, application.ApplyTime.Year);
+                if (previousDate?.Date != application.ApplyTime.Date)
+                    worksheet.Cell(row, 1).Value = $"{application.ApplyTime.Month}.{application.ApplyTime.Day}";
+                else
+                    worksheet.Cell(row, 1).Clear(XLClearOptions.Contents);
+
+                worksheet.Cell(row, 2).Value = application.CompanyName;
+                worksheet.Cell(row, 3).SetValue(application.CreditCode);
+                worksheet.Cell(row, 3).Style.NumberFormat.Format = "@";
+                worksheet.Cell(row, 4).Value = application.Amount;
+                worksheet.Cell(row, 6).SetValue(application.Email);
+                worksheet.Cell(row, 6).Style.NumberFormat.Format = "@";
+                workbook.SaveAs(tempPath);
+            }
+
+            RestorePreservedWorksheetParts(tempPath, worksheetName, originalWorksheetParts);
+
+            using (var verify = new XLWorkbook(tempPath))
+            {
+                var verifySheet = verify.Worksheet(worksheetName);
+                if (!RowMatches(verifySheet, row, application))
+                    throw new InvalidDataException("Excel ä¸´æ—¶æ–‡ä»¶æ ¡éªŒå¤±è´¥ï¼šç›®æ ‡è¡Œå†…å®¹ä¸ä¸€è‡´ã€‚");
+            }
+
+            using (var durable = new FileStream(tempPath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read))
+                durable.Flush(true);
+
+            File.Replace(tempPath, filePath, null, true);
+            return row;
+        }
+        finally
+        {
+            if (File.Exists(tempPath)) File.Delete(tempPath);
+            ownedLock?.Dispose();
+        }
+    }
+
+    private static void EnsureWritable(string filePath)
+    {
+        if (!File.Exists(filePath)) throw new FileNotFoundException("Excel ç™»è®°è¡¨ä¸å­˜åœ¨ã€‚", filePath);
+        if (File.GetAttributes(filePath).HasFlag(FileAttributes.ReadOnly))
+            throw new IOException("Excel ç™»è®°è¡¨å¤„äºŽåªè¯»å±žæ€§ï¼Œè¯·å–æ¶ˆåªè¯»åŽé‡è¯•ã€‚");
+        try
+        {
+            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw new IOException("Excel ç™»è®°è¡¨æ²¡æœ‰å†™å…¥æƒé™ï¼Œè¯·æ£€æŸ¥æ–‡ä»¶æƒé™åŽé‡è¯•ã€‚", ex);
+        }
+        catch (IOException ex)
+        {
+            throw new IOException("Excel ç™»è®°è¡¨æ­£åœ¨è¢«å ç”¨ï¼Œç”³è¯·å°†ä¿ç•™åœ¨ç­‰å¾…é˜Ÿåˆ—ã€‚", ex);
+        }
+    }
+
+    private static bool RowIsEmpty(IXLWorksheet worksheet, int row)
+    {
+        var lastColumn = Math.Max(8, worksheet.LastColumnUsed()?.ColumnNumber() ?? 8);
+        return Enumerable.Range(1, lastColumn).All(column => worksheet.Cell(row, column).IsEmpty());
+    }
+
+    private static int? FindMatchingRow(IXLWorksheet worksheet, InvoiceApplication application, int lastRow)
+    {
+        int? match = null;
+        for (var row = 2; row <= lastRow; row++)
+        {
+            if (!RowMatches(worksheet, row, application)) continue;
+            if (match is not null) return null;
+            match = row;
+        }
+        return match;
+    }
+
+    private static bool RowMatches(IXLWorksheet worksheet, int row, InvoiceApplication application)
+    {
+        if (!string.Equals(worksheet.Cell(row, 2).GetString().Trim(), application.CompanyName.Trim(), StringComparison.Ordinal)) return false;
+        if (!string.Equals(worksheet.Cell(row, 3).GetString().Trim(), application.CreditCode.Trim(), StringComparison.Ordinal)) return false;
+        if (!decimal.TryParse(worksheet.Cell(row, 4).GetString(), out var amount) || amount != application.Amount) return false;
+        return string.Equals(worksheet.Cell(row, 6).GetString().Trim(), application.Email.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void CopyRowStyle(IXLWorksheet ws, int sourceRow, int targetRow)
+    {
+        for (var col = 1; col <= 8; col++)
+            ws.Cell(targetRow, col).Style = ws.Cell(sourceRow, col).Style;
+        ws.Row(targetRow).Height = ws.Row(sourceRow).Height;
+    }
+
+    private static DateTime? FindPreviousApplicationDate(IXLWorksheet ws, int row, int assumedYear)
+    {
+        for (var current = row; current >= 2; current--)
+        {
+            var text = ws.Cell(current, 1).GetString().Trim();
+            if (string.IsNullOrWhiteSpace(text)) continue;
+            var parts = text.Split('.');
+            if (parts.Length == 2 && int.TryParse(parts[0], out var month) && int.TryParse(parts[1], out var day))
+            {
+                try { return new DateTime(assumedYear, month, day); }
+                catch (ArgumentOutOfRangeException) { return null; }
+            }
+        }
+        return null;
+    }
+
+    private sealed record PreservedWorksheetParts(
+        XElement? SheetProperties,
+        XElement? SheetFormatProperties,
+        XElement? FreezePane,
+        XElement? PrintOptions,
+        XElement? PageMargins,
+        XElement? PageSetup,
+        XElement? HeaderFooter,
+        XElement? RowBreaks,
+        XElement? ColumnBreaks);
+
+    private static PreservedWorksheetParts ReadPreservedWorksheetParts(string filePath, string worksheetName)
+    {
+        using var archive = ZipFile.OpenRead(filePath);
+        var worksheetPath = ResolveWorksheetPath(archive, worksheetName);
+        using var stream = archive.GetEntry(worksheetPath)?.Open();
+        if (stream is null) throw new InvalidDataException($"å·¥ä½œè¡¨ XML ä¸å­˜åœ¨ï¼š{worksheetName}");
+        var document = XDocument.Load(stream);
+        XNamespace spreadsheet = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        var root = document.Root ?? throw new InvalidDataException($"å·¥ä½œè¡¨ XML æ— æ ¹èŠ‚ç‚¹ï¼š{worksheetName}");
+        var sheetView = root.Element(spreadsheet + "sheetViews")?.Elements(spreadsheet + "sheetView").FirstOrDefault();
+        return new PreservedWorksheetParts(
+            CloneElement(root.Element(spreadsheet + "sheetPr")),
+            CloneElement(root.Element(spreadsheet + "sheetFormatPr")),
+            CloneElement(sheetView?.Element(spreadsheet + "pane")),
+            CloneElement(root.Element(spreadsheet + "printOptions")),
+            CloneElement(root.Element(spreadsheet + "pageMargins")),
+            CloneElement(root.Element(spreadsheet + "pageSetup")),
+            CloneElement(root.Element(spreadsheet + "headerFooter")),
+            CloneElement(root.Element(spreadsheet + "rowBreaks")),
+            CloneElement(root.Element(spreadsheet + "colBreaks")));
+    }
+
+    private static void RestorePreservedWorksheetParts(string filePath, string worksheetName, PreservedWorksheetParts originalParts)
+    {
+        using var archive = ZipFile.Open(filePath, ZipArchiveMode.Update);
+        var worksheetPath = ResolveWorksheetPath(archive, worksheetName);
+        var entry = archive.GetEntry(worksheetPath) ?? throw new InvalidDataException($"å·¥ä½œè¡¨ XML ä¸å­˜åœ¨ï¼š{worksheetName}");
+        XDocument document;
+        using (var stream = entry.Open()) document = XDocument.Load(stream);
+
+        XNamespace spreadsheet = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        var root = document.Root ?? throw new InvalidDataException($"å·¥ä½œè¡¨ XML æ— æ ¹èŠ‚ç‚¹ï¼š{worksheetName}");
+        ReplaceChild(root, spreadsheet + "sheetPr", originalParts.SheetProperties);
+        ReplaceChild(root, spreadsheet + "sheetFormatPr", originalParts.SheetFormatProperties);
+        var sheetView = document.Root?.Element(spreadsheet + "sheetViews")?.Elements(spreadsheet + "sheetView").FirstOrDefault();
+        if (sheetView is not null)
+        {
+            ReplaceChild(sheetView, spreadsheet + "pane", originalParts.FreezePane);
+        }
+
+        ReplaceChild(root, spreadsheet + "printOptions", originalParts.PrintOptions);
+        ReplaceChild(root, spreadsheet + "pageMargins", originalParts.PageMargins);
+        ReplaceChild(root, spreadsheet + "pageSetup", originalParts.PageSetup);
+        ReplaceChild(root, spreadsheet + "headerFooter", originalParts.HeaderFooter);
+        ReplaceChild(root, spreadsheet + "rowBreaks", originalParts.RowBreaks);
+        ReplaceChild(root, spreadsheet + "colBreaks", originalParts.ColumnBreaks);
+
+        entry.Delete();
+        var replacement = archive.CreateEntry(worksheetPath, CompressionLevel.Optimal);
+        using var output = replacement.Open();
+        document.Save(output, System.Xml.Linq.SaveOptions.DisableFormatting);
+    }
+
+    private static XElement? CloneElement(XElement? element) => element is null ? null : new XElement(element);
+
+    private static void ReplaceChild(XElement parent, XName name, XElement? original)
+    {
+        var current = parent.Element(name);
+        if (current is not null)
+        {
+            if (original is null) current.Remove();
+            else current.ReplaceWith(new XElement(original));
+        }
+        else if (original is not null)
+        {
+            parent.Add(new XElement(original));
+        }
+    }
+
+    private static string ResolveWorksheetPath(ZipArchive archive, string worksheetName)
+    {
+        XNamespace spreadsheet = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        XNamespace officeRelationships = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+        XNamespace packageRelationships = "http://schemas.openxmlformats.org/package/2006/relationships";
+        var workbook = LoadXmlEntry(archive, "xl/workbook.xml");
+        var relationships = LoadXmlEntry(archive, "xl/_rels/workbook.xml.rels");
+        var sheet = workbook.Root?.Element(spreadsheet + "sheets")?.Elements(spreadsheet + "sheet").SingleOrDefault(x => x.Attribute("name")?.Value == worksheetName)
+            ?? throw new InvalidOperationException($"å·¥ä½œè¡¨ä¸å­˜åœ¨ï¼š{worksheetName}");
+        var relationshipId = sheet.Attribute(officeRelationships + "id")?.Value
+            ?? throw new InvalidDataException($"å·¥ä½œè¡¨å…³ç³»ä¸å­˜åœ¨ï¼š{worksheetName}");
+        var target = relationships.Root?.Elements(packageRelationships + "Relationship").SingleOrDefault(x => x.Attribute("Id")?.Value == relationshipId)?.Attribute("Target")?.Value
+            ?? throw new InvalidDataException($"å·¥ä½œè¡¨ç›®æ ‡ä¸å­˜åœ¨ï¼š{worksheetName}");
+        target = target.Replace('\\', '/');
+        if (target.StartsWith("/", StringComparison.Ordinal)) return target.TrimStart('/');
+        if (target.StartsWith("../", StringComparison.Ordinal)) return "xl/" + target[3..];
+        return "xl/" + target.TrimStart('/');
+    }
+
+    private static XDocument LoadXmlEntry(ZipArchive archive, string path)
+    {
+        var entry = archive.GetEntry(path) ?? throw new InvalidDataException($"Excel æ–‡ä»¶ç¼ºå°‘ XML éƒ¨ä»¶ï¼š{path}");
+        using var stream = entry.Open();
+        return XDocument.Load(stream);
+    }
+}
+
+public sealed class DpapiCredentialStore(string directory)
+{
+    public async Task SaveAsync(string account, string password, CancellationToken cancellationToken = default)
+    {
+        Directory.CreateDirectory(directory);
+        var cipher = ProtectedData.Protect(Encoding.UTF8.GetBytes(password), Entropy(account), DataProtectionScope.CurrentUser);
+        var path = PathFor(account);
+        var tempPath = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            await File.WriteAllBytesAsync(tempPath, cipher, cancellationToken);
+            using (var durable = new FileStream(tempPath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read))
+                durable.Flush(true);
+
+            if (File.Exists(path)) File.Replace(tempPath, path, null, true);
+            else File.Move(tempPath, path);
+        }
+        finally
+        {
+            if (File.Exists(tempPath)) File.Delete(tempPath);
+        }
+    }
+
+    public async Task<string?> LoadAsync(string account, CancellationToken cancellationToken = default)
+    {
+        var path = PathFor(account);
+        if (!File.Exists(path)) return null;
+        var cipher = await File.ReadAllBytesAsync(path, cancellationToken);
+        var clear = ProtectedData.Unprotect(cipher, Entropy(account), DataProtectionScope.CurrentUser);
+        return Encoding.UTF8.GetString(clear);
+    }
+
+    public Task DeleteAsync(string account, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var path = PathFor(account);
+        if (File.Exists(path)) File.Delete(path);
+        return Task.CompletedTask;
+    }
+
+    private static byte[] Entropy(string account) => SHA256.HashData(Encoding.UTF8.GetBytes($"InvoiceMailAssistant|{account.Trim().ToLowerInvariant()}"));
+    private string PathFor(string account) => Path.Combine(directory, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(account.Trim().ToLowerInvariant()))) + ".cred");
+}
+
+public static class StartupManager
+{
+    private const string RunKey = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+    private const string ValueName = "InvoiceMailAssistant";
+
+    public static void SetEnabled(bool enabled)
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(RunKey, true)
+                ?? throw new InvalidOperationException("æ— æ³•æ‰“å¼€å½“å‰ç”¨æˆ·çš„å¼€æœºå¯åŠ¨æ³¨å†Œè¡¨é¡¹ã€‚");
+            if (!enabled)
+            {
+                key.DeleteValue(ValueName, false);
+                return;
+            }
+
+            var processPath = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(processPath)) throw new InvalidOperationException("æ— æ³•ç¡®å®šç¨‹åºè·¯å¾„ã€‚");
+            key.SetValue(ValueName, $"\"{processPath}\"");
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or SecurityException or IOException)
+        {
+            throw new InvalidOperationException("å¼€æœºå¯åŠ¨è®¾ç½®å¤±è´¥ã€‚", ex);
+        }
+    }
+}
