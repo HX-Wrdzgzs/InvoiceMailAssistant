@@ -117,4 +117,17 @@ public sealed class InvoiceParserTests
         Assert.Equal("invoice@example.com", result.Application.Email);
         Assert.Equal(300m, result.Application.Amount);
     }
+
+    [Fact]
+    public void DisplaysBusinessApplyTimeAndProcessingTimeSeparately()
+    {
+        var application = new InvoiceApplication
+        {
+            ApplyTime = new DateTime(2023, 1, 1, 15, 0, 0),
+            UpdatedAt = new DateTimeOffset(2026, 8, 10, 14, 52, 16, TimeSpan.FromHours(8))
+        };
+
+        Assert.Equal("2023-01-01 15:00", application.DisplayApplyTime);
+        Assert.Equal("2026-08-10 14:52", application.DisplayProcessedTime);
+    }
 }

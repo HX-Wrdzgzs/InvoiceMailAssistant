@@ -67,6 +67,7 @@
                         <DataGrid ItemsSource="{Binding Records}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" HeadersVisibility="Column" GridLinesVisibility="Horizontal" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" RowBackground="White" AlternatingRowBackground="#FAFBFC" MinHeight="260">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="申请时间" Binding="{Binding DisplayApplyTime}" Width="145"/>
+                                <DataGridTextColumn Header="处理时间" Binding="{Binding DisplayProcessedTime}" Width="145"/>
                                 <DataGridTextColumn Header="企业名称" Binding="{Binding DisplayCompanyName}" Width="*"/>
                                 <DataGridTextColumn Header="信用代码" Binding="{Binding DisplayCreditCode}" Width="170"/>
                                 <DataGridTextColumn Header="金额" Binding="{Binding DisplayAmount}" Width="90"/>
@@ -83,7 +84,7 @@
                     <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="处理记录" FontSize="24" FontWeight="SemiBold"/><TextBlock Text="数据库中最近 200 条开票申请" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0"/></StackPanel><Button Grid.Column="1" Content="重新解析失败记录" Command="{Binding ReparseFailedCommand}"/></Grid>
                     <DataGrid Grid.Row="2" ItemsSource="{Binding Records}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="申请时间" Binding="{Binding DisplayApplyTime}" Width="145"/><DataGridTextColumn Header="企业名称" Binding="{Binding DisplayCompanyName}" Width="*"/><DataGridTextColumn Header="信用代码" Binding="{Binding DisplayCreditCode}" Width="165"/><DataGridTextColumn Header="金额" Binding="{Binding DisplayAmount}" Width="90"/><DataGridTextColumn Header="邮箱" Binding="{Binding Email}" Width="190"/><DataGridTextColumn Header="状态" Binding="{Binding ProcessingStatus}" Width="100"/><DataGridTextColumn Header="行" Binding="{Binding ExcelRow}" Width="60"/>
+                            <DataGridTextColumn Header="申请时间" Binding="{Binding DisplayApplyTime}" Width="145"/><DataGridTextColumn Header="处理时间" Binding="{Binding DisplayProcessedTime}" Width="145"/><DataGridTextColumn Header="企业名称" Binding="{Binding DisplayCompanyName}" Width="*"/><DataGridTextColumn Header="信用代码" Binding="{Binding DisplayCreditCode}" Width="165"/><DataGridTextColumn Header="金额" Binding="{Binding DisplayAmount}" Width="90"/><DataGridTextColumn Header="邮箱" Binding="{Binding Email}" Width="190"/><DataGridTextColumn Header="状态" Binding="{Binding ProcessingStatus}" Width="100"/><DataGridTextColumn Header="行" Binding="{Binding ExcelRow}" Width="60"/>
                         </DataGrid.Columns>
                     </DataGrid>
                 </Grid>
