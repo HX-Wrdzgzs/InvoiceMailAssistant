@@ -1,4 +1,5 @@
 using ClosedXML.Excel;
+using System.IO.Compression;
 using InvoiceMailAssistant.App;
 using Xunit;
 
@@ -325,6 +326,46 @@ public sealed class ExcelWriterTests
                 File.Delete(path);
             }
         }
+    }
+
+    [Fact]
+    public async Task PatchingRowsDoesNotRewriteStylesPart()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"invoice-mail-{Guid.NewGuid():N}.xlsx");
+        try
+        {
+            using (var workbook = new XLWorkbook())
+            {
+                var sheet = workbook.AddWorksheet("中外运");
+                sheet.Cell(1, 1).Value = "日期";
+                sheet.Cell(1, 2).Value = "企业名称";
+                sheet.Cell(2, 1).Style.Fill.BackgroundColor = XLColor.LightBlue;
+                sheet.Cell(2, 2).Style.Font.Bold = true;
+                workbook.SaveAs(path);
+            }
+
+            var stylesBefore = ReadZipEntry(path, "xl/styles.xml");
+            var application = CreateApplication(2);
+            await new ExcelWriter().WriteAsync(application, path, "中外运");
+            var stylesAfter = ReadZipEntry(path, "xl/styles.xml");
+
+            Assert.Equal(stylesBefore, stylesAfter);
+            using var verify = new XLWorkbook(path);
+            Assert.Equal(application.CompanyName, verify.Worksheet("中外运").Cell(2, 2).GetString());
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    private static byte[] ReadZipEntry(string path, string entryName)
+    {
+        using var archive = ZipFile.OpenRead(path);
+        using var stream = archive.GetEntry(entryName)!.Open();
+        using var buffer = new MemoryStream();
+        stream.CopyTo(buffer);
+        return buffer.ToArray();
     }
 
     private static InvoiceApplication CreateApplication(int row)
