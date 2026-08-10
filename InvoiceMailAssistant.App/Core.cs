@@ -44,6 +44,7 @@ public sealed class InvoiceApplication
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.Now;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
     public string ErrorMessage { get; set; } = string.Empty;
+    public string DisplayProcessedTime => UpdatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
     public string DisplayApplyTime => ProcessingStatus is ProcessingStatus.ParseFailed or ProcessingStatus.MailFailed
         ? MailReceivedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
         : ApplyTime.ToString("yyyy-MM-dd HH:mm");
