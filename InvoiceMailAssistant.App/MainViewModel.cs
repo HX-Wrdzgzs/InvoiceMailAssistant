@@ -206,11 +206,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 added++;
             }
 
+            var repaired = await ReparseFailedCoreAsync();
             await RetryPendingCoreAsync();
             _lastChecked = DateTime.Now;
             ConnectionText = $"已连接：{EmailAccount.Trim()}";
             if (added > 0) NewApplicationsFound?.Invoke(added);
-            if (!automatic || added > 0) StatusText = $"检查完成，本次发现 {added} 条新申请";
+            if (!automatic || added > 0 || repaired > 0)
+                StatusText = $"检查完成，本次发现 {added} 条新申请，重新处理 {repaired} 条失败记录";
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -262,10 +264,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         StatusText = $"正在补扫最近 {days} 天邮件";
         await CheckNowAsync(false, DateTimeOffset.UtcNow.AddDays(-days));
-        if (StatusText.StartsWith("检查完成", StringComparison.Ordinal))
-            StatusText = $"历史补扫完成：最近 {days} 天";
-        else if (StatusText.StartsWith("正在补扫", StringComparison.Ordinal))
-            StatusText = "历史补扫未执行：当前已有检查任务在运行";
+        StatusText = $"历史补扫完成：最近 {days} 天";
     }
 
     private async Task ReparseFailedAsync()
@@ -273,30 +272,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         if (!await _checkGate.WaitAsync(0)) return;
         try
         {
-            var failed = await _repository.GetParseFailedAsync(_lifetime.Token);
-            var repaired = 0;
-            foreach (var item in failed)
-            {
-                var mail = new MailEnvelope(
-                    item.ImapUid,
-                    item.MessageId,
-                    item.MailFrom,
-                    item.MailSubject,
-                    item.MailReceivedAt,
-                    item.NormalizedBody,
-                    item.UidValidity,
-                    item.MailboxName);
-                var parsed = _parser.Parse(mail, item.MailboxIdentity);
-                if (!parsed.Success || parsed.Application is null) continue;
-
-                var app = parsed.Application;
-                app.Id = item.Id;
-                app.ExcelRow = item.ExcelRow;
-                app.CreatedAt = item.CreatedAt;
-                await _repository.UpdateParsedAsync(app.Id, app, Deduplication.CreateFallbackHash(app), _lifetime.Token);
-                await TryWriteExcelAsync(app);
-                repaired++;
-            }
+            var repaired = await ReparseFailedCoreAsync();
 
             StatusText = $"已重新解析 {repaired} 条失败记录";
             await RefreshRecordsAsync();
@@ -309,6 +285,36 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             _checkGate.Release();
         }
+    }
+
+    private async Task<int> ReparseFailedCoreAsync()
+    {
+        var failed = await _repository.GetParseFailedAsync(_lifetime.Token);
+        var repaired = 0;
+        foreach (var item in failed)
+        {
+            var mail = new MailEnvelope(
+                item.ImapUid,
+                item.MessageId,
+                item.MailFrom,
+                item.MailSubject,
+                item.MailReceivedAt,
+                item.NormalizedBody,
+                item.UidValidity,
+                item.MailboxName);
+            var parsed = _parser.Parse(mail, item.MailboxIdentity);
+            if (!parsed.Success || parsed.Application is null) continue;
+
+            var app = parsed.Application;
+            app.Id = item.Id;
+            app.ExcelRow = item.ExcelRow;
+            app.CreatedAt = item.CreatedAt;
+            await _repository.UpdateParsedAsync(app.Id, app, Deduplication.CreateFallbackHash(app), _lifetime.Token);
+            await TryWriteExcelAsync(app);
+            repaired++;
+        }
+
+        return repaired;
     }
 
     private async Task TryWriteExcelAsync(InvoiceApplication app)

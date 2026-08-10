@@ -44,6 +44,18 @@ public sealed class InvoiceApplication
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.Now;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
     public string ErrorMessage { get; set; } = string.Empty;
+    public string DisplayApplyTime => ProcessingStatus is ProcessingStatus.ParseFailed or ProcessingStatus.MailFailed
+        ? MailReceivedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+        : ApplyTime.ToString("yyyy-MM-dd HH:mm");
+    public string DisplayCompanyName => ProcessingStatus is ProcessingStatus.ParseFailed or ProcessingStatus.MailFailed
+        ? "解析失败邮件"
+        : CompanyName;
+    public string DisplayCreditCode => ProcessingStatus is ProcessingStatus.ParseFailed or ProcessingStatus.MailFailed
+        ? "—"
+        : CreditCode;
+    public string DisplayAmount => ProcessingStatus is ProcessingStatus.ParseFailed or ProcessingStatus.MailFailed
+        ? "—"
+        : Amount.ToString("F2", CultureInfo.InvariantCulture);
 }
 
 public sealed record MailEnvelope(
@@ -151,7 +163,8 @@ public sealed partial class InvoiceParser
             if (index <= 0) continue;
             var label = line[..index].Trim();
             var value = line[(index + 1)..].Trim();
-            if (!result.ContainsKey(label)) result[label] = value;
+            if (!result.TryGetValue(label, out var existing) || string.IsNullOrWhiteSpace(existing))
+                result[label] = value;
         }
         return result;
     }
