@@ -1,5 +1,6 @@
 using System.IO;
 using System.IO.Compression;
+using System.Globalization;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Security;
@@ -400,7 +401,96 @@ public sealed class SqliteInvoiceRepository(string databasePath)
 
     public async Task UpdateParsedAsync(long id, InvoiceApplication app, string fallbackHash, CancellationToken cancellationToken = default)
     {
-        await using var connection = await…1285 tokens truncated…ring(r.GetOrdinal("normalized_body")),
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE invoice_applications SET
+                company_name=$company, credit_code=$credit, amount=$amount, apply_time=$apply,
+                invoice_type=$type, recipient=$recipient, phone=$phone, address=$address, email=$email, remark=$remark,
+                message_id=$messageId, imap_uid=$uid, uid_validity=$uidValidity, mailbox_name=$mailboxName,
+                mailbox_identity=$mailbox, mail_received_at=$received, mail_subject=$subject, mail_from=$from,
+                normalized_body=$body, processing_status=$status, excel_row=$excelRow, updated_at=$updated,
+                error_message=$error, fallback_hash=$hash
+            WHERE id=$id;
+            """;
+        app.Id = id;
+        app.ProcessingStatus = ProcessingStatus.PendingExcel;
+        app.ErrorMessage = string.Empty;
+        app.UpdatedAt = DateTimeOffset.Now;
+        AddParameters(command, app, fallbackHash);
+        command.Parameters.AddWithValue("$id", id);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static void AddParameters(SqliteCommand command, InvoiceApplication app, string hash)
+    {
+        command.Parameters.AddWithValue("$company", app.CompanyName);
+        command.Parameters.AddWithValue("$credit", app.CreditCode);
+        command.Parameters.AddWithValue("$amount", app.Amount.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$apply", app.ApplyTime.ToString("O"));
+        command.Parameters.AddWithValue("$type", app.InvoiceType);
+        command.Parameters.AddWithValue("$recipient", app.Recipient);
+        command.Parameters.AddWithValue("$phone", app.Phone);
+        command.Parameters.AddWithValue("$address", app.Address);
+        command.Parameters.AddWithValue("$email", app.Email);
+        command.Parameters.AddWithValue("$remark", app.Remark);
+        command.Parameters.AddWithValue("$messageId", app.MessageId);
+        command.Parameters.AddWithValue("$uid", (long)app.ImapUid);
+        command.Parameters.AddWithValue("$uidValidity", (long)app.UidValidity);
+        command.Parameters.AddWithValue("$mailboxName", app.MailboxName);
+        command.Parameters.AddWithValue("$mailbox", app.MailboxIdentity);
+        command.Parameters.AddWithValue("$received", app.MailReceivedAt.ToString("O"));
+        command.Parameters.AddWithValue("$subject", app.MailSubject);
+        command.Parameters.AddWithValue("$from", app.MailFrom);
+        command.Parameters.AddWithValue("$body", app.NormalizedBody);
+        command.Parameters.AddWithValue("$status", (int)app.ProcessingStatus);
+        command.Parameters.AddWithValue("$excelRow", (object?)app.ExcelRow ?? DBNull.Value);
+        command.Parameters.AddWithValue("$created", app.CreatedAt.ToString("O"));
+        command.Parameters.AddWithValue("$updated", app.UpdatedAt.ToString("O"));
+        command.Parameters.AddWithValue("$error", app.ErrorMessage);
+        command.Parameters.AddWithValue("$hash", hash);
+    }
+
+    private async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken)
+    {
+        var connection = new SqliteConnection(_connectionString);
+        try
+        {
+            await connection.OpenAsync(cancellationToken);
+            var pragma = connection.CreateCommand();
+            pragma.CommandText = "PRAGMA busy_timeout=10000;";
+            await pragma.ExecuteNonQueryAsync(cancellationToken);
+            return connection;
+        }
+        catch
+        {
+            await connection.DisposeAsync();
+            throw;
+        }
+    }
+
+    private static InvoiceApplication Map(SqliteDataReader r) => new()
+    {
+        Id = r.GetInt64(r.GetOrdinal("id")),
+        CompanyName = r.GetString(r.GetOrdinal("company_name")),
+        CreditCode = r.GetString(r.GetOrdinal("credit_code")),
+        Amount = decimal.Parse(r.GetString(r.GetOrdinal("amount")), System.Globalization.CultureInfo.InvariantCulture),
+        ApplyTime = DateTime.Parse(r.GetString(r.GetOrdinal("apply_time")), null, System.Globalization.DateTimeStyles.RoundtripKind),
+        InvoiceType = r.GetString(r.GetOrdinal("invoice_type")),
+        Recipient = r.GetString(r.GetOrdinal("recipient")),
+        Phone = r.GetString(r.GetOrdinal("phone")),
+        Address = r.GetString(r.GetOrdinal("address")),
+        Email = r.GetString(r.GetOrdinal("email")),
+        Remark = r.GetString(r.GetOrdinal("remark")),
+        MessageId = r.GetString(r.GetOrdinal("message_id")),
+        ImapUid = checked((uint)r.GetInt64(r.GetOrdinal("imap_uid"))),
+        UidValidity = checked((uint)r.GetInt64(r.GetOrdinal("uid_validity"))),
+        MailboxName = r.GetString(r.GetOrdinal("mailbox_name")),
+        MailboxIdentity = r.GetString(r.GetOrdinal("mailbox_identity")),
+        MailReceivedAt = DateTimeOffset.Parse(r.GetString(r.GetOrdinal("mail_received_at"))),
+        MailSubject = r.GetString(r.GetOrdinal("mail_subject")),
+        MailFrom = r.GetString(r.GetOrdinal("mail_from")),
+        NormalizedBody = r.GetString(r.GetOrdinal("normalized_body")),
         ProcessingStatus = (ProcessingStatus)r.GetInt32(r.GetOrdinal("processing_status")),
         ExcelRow = r.IsDBNull(r.GetOrdinal("excel_row")) ? null : r.GetInt32(r.GetOrdinal("excel_row")),
         CreatedAt = DateTimeOffset.Parse(r.GetString(r.GetOrdinal("created_at"))),
@@ -516,9 +606,9 @@ public sealed class ExcelWriter
         try
         {
             EnsureWritable(filePath);
-            var originalWorksheetParts = ReadPreservedWorksheetParts(filePath, worksheetName);
             File.Copy(filePath, tempPath, true);
             var row = application.ExcelRow ?? throw new InvalidOperationException("尚未为 Excel 写入预留目标行。");
+            DateTime? previousDate;
             using (var workbook = new XLWorkbook(tempPath))
             {
                 if (!workbook.Worksheets.TryGetWorksheet(worksheetName, out var worksheet))
@@ -539,24 +629,15 @@ public sealed class ExcelWriter
                 if (RowMatches(worksheet, row, application))
                     return row;
 
-                if (row > 2) CopyRowStyle(worksheet, row - 1, row);
-
-                var previousDate = FindPreviousApplicationDate(worksheet, row - 1, application.ApplyTime.Year);
-                if (previousDate?.Date != application.ApplyTime.Date)
-                    worksheet.Cell(row, 1).Value = $"{application.ApplyTime.Month}.{application.ApplyTime.Day}";
-                else
-                    worksheet.Cell(row, 1).Clear(XLClearOptions.Contents);
-
-                worksheet.Cell(row, 2).Value = application.CompanyName;
-                worksheet.Cell(row, 3).SetValue(application.CreditCode);
-                worksheet.Cell(row, 3).Style.NumberFormat.Format = "@";
-                worksheet.Cell(row, 4).Value = application.Amount;
-                worksheet.Cell(row, 6).SetValue(application.Email);
-                worksheet.Cell(row, 6).Style.NumberFormat.Format = "@";
-                workbook.SaveAs(tempPath);
+                previousDate = FindPreviousApplicationDate(worksheet, row - 1, application.ApplyTime.Year);
             }
 
-            RestorePreservedWorksheetParts(tempPath, worksheetName, originalWorksheetParts);
+            // ClosedXML is used above only for read-only row planning. Saving the
+            // whole workbook through it rewrites styles.xml and can make real
+            // customer workbooks trigger Excel's repair dialog. Patch only the
+            // target worksheet package part so every other workbook part remains
+            // byte-for-byte unchanged.
+            PatchWorksheetXml(tempPath, worksheetName, application, row, previousDate);
 
             using (var verify = new XLWorkbook(tempPath))
             {
@@ -623,13 +704,6 @@ public sealed class ExcelWriter
         return string.Equals(worksheet.Cell(row, 6).GetString().Trim(), application.Email.Trim(), StringComparison.OrdinalIgnoreCase);
     }
 
-    private static void CopyRowStyle(IXLWorksheet ws, int sourceRow, int targetRow)
-    {
-        for (var col = 1; col <= 8; col++)
-            ws.Cell(targetRow, col).Style = ws.Cell(sourceRow, col).Style;
-        ws.Row(targetRow).Height = ws.Row(sourceRow).Height;
-    }
-
     private static DateTime? FindPreviousApplicationDate(IXLWorksheet ws, int row, int assumedYear)
     {
         for (var current = row; current >= 2; current--)
@@ -646,63 +720,42 @@ public sealed class ExcelWriter
         return null;
     }
 
-    private sealed record PreservedWorksheetParts(
-        XElement? SheetProperties,
-        XElement? SheetFormatProperties,
-        XElement? FreezePane,
-        XElement? PrintOptions,
-        XElement? PageMargins,
-        XElement? PageSetup,
-        XElement? HeaderFooter,
-        XElement? RowBreaks,
-        XElement? ColumnBreaks);
-
-    private static PreservedWorksheetParts ReadPreservedWorksheetParts(string filePath, string worksheetName)
-    {
-        using var archive = ZipFile.OpenRead(filePath);
-        var worksheetPath = ResolveWorksheetPath(archive, worksheetName);
-        using var stream = archive.GetEntry(worksheetPath)?.Open();
-        if (stream is null) throw new InvalidDataException($"工作表 XML 不存在：{worksheetName}");
-        var document = XDocument.Load(stream);
-        XNamespace spreadsheet = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
-        var root = document.Root ?? throw new InvalidDataException($"工作表 XML 无根节点：{worksheetName}");
-        var sheetView = root.Element(spreadsheet + "sheetViews")?.Elements(spreadsheet + "sheetView").FirstOrDefault();
-        return new PreservedWorksheetParts(
-            CloneElement(root.Element(spreadsheet + "sheetPr")),
-            CloneElement(root.Element(spreadsheet + "sheetFormatPr")),
-            CloneElement(sheetView?.Element(spreadsheet + "pane")),
-            CloneElement(root.Element(spreadsheet + "printOptions")),
-            CloneElement(root.Element(spreadsheet + "pageMargins")),
-            CloneElement(root.Element(spreadsheet + "pageSetup")),
-            CloneElement(root.Element(spreadsheet + "headerFooter")),
-            CloneElement(root.Element(spreadsheet + "rowBreaks")),
-            CloneElement(root.Element(spreadsheet + "colBreaks")));
-    }
-
-    private static void RestorePreservedWorksheetParts(string filePath, string worksheetName, PreservedWorksheetParts originalParts)
+    private static void PatchWorksheetXml(string filePath, string worksheetName, InvoiceApplication application, int targetRow, DateTime? previousDate)
     {
         using var archive = ZipFile.Open(filePath, ZipArchiveMode.Update);
         var worksheetPath = ResolveWorksheetPath(archive, worksheetName);
         var entry = archive.GetEntry(worksheetPath) ?? throw new InvalidDataException($"工作表 XML 不存在：{worksheetName}");
         XDocument document;
-        using (var stream = entry.Open()) document = XDocument.Load(stream);
+        using (var stream = entry.Open())
+            document = XDocument.Load(stream, System.Xml.Linq.LoadOptions.PreserveWhitespace);
 
         XNamespace spreadsheet = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
         var root = document.Root ?? throw new InvalidDataException($"工作表 XML 无根节点：{worksheetName}");
-        ReplaceChild(root, spreadsheet + "sheetPr", originalParts.SheetProperties);
-        ReplaceChild(root, spreadsheet + "sheetFormatPr", originalParts.SheetFormatProperties);
-        var sheetView = document.Root?.Element(spreadsheet + "sheetViews")?.Elements(spreadsheet + "sheetView").FirstOrDefault();
-        if (sheetView is not null)
+        var sheetData = root.Element(spreadsheet + "sheetData")
+            ?? throw new InvalidDataException($"工作表 XML 缺少 sheetData：{worksheetName}");
+        var rows = sheetData.Elements(spreadsheet + "row").ToArray();
+        var target = rows.SingleOrDefault(x => RowNumber(x) == targetRow);
+        var previous = rows.Where(x => RowNumber(x) < targetRow).OrderBy(x => RowNumber(x)).LastOrDefault();
+
+        if (target is null)
         {
-            ReplaceChild(sheetView, spreadsheet + "pane", originalParts.FreezePane);
+            target = new XElement(spreadsheet + "row", new XAttribute("r", targetRow));
+            CopyRowFormatting(previous, target, spreadsheet, targetRow);
+            var next = rows.FirstOrDefault(x => RowNumber(x) > targetRow);
+            if (next is null) sheetData.Add(target);
+            else next.AddBeforeSelf(target);
         }
 
-        ReplaceChild(root, spreadsheet + "printOptions", originalParts.PrintOptions);
-        ReplaceChild(root, spreadsheet + "pageMargins", originalParts.PageMargins);
-        ReplaceChild(root, spreadsheet + "pageSetup", originalParts.PageSetup);
-        ReplaceChild(root, spreadsheet + "headerFooter", originalParts.HeaderFooter);
-        ReplaceChild(root, spreadsheet + "rowBreaks", originalParts.RowBreaks);
-        ReplaceChild(root, spreadsheet + "colBreaks", originalParts.ColumnBreaks);
+        if (previousDate?.Date != application.ApplyTime.Date)
+            SetInlineString(target, spreadsheet, 1, $"{application.ApplyTime.Month}.{application.ApplyTime.Day}", previous, targetRow);
+        else
+            ClearCell(target, spreadsheet, 1, previous, targetRow);
+
+        SetInlineString(target, spreadsheet, 2, application.CompanyName, previous, targetRow);
+        SetInlineString(target, spreadsheet, 3, application.CreditCode, previous, targetRow);
+        SetNumeric(target, spreadsheet, 4, application.Amount, previous, targetRow);
+        SetInlineString(target, spreadsheet, 6, application.Email, previous, targetRow);
+        ExpandDimension(root, spreadsheet, targetRow, 8);
 
         entry.Delete();
         var replacement = archive.CreateEntry(worksheetPath, CompressionLevel.Optimal);
@@ -710,20 +763,135 @@ public sealed class ExcelWriter
         document.Save(output, System.Xml.Linq.SaveOptions.DisableFormatting);
     }
 
-    private static XElement? CloneElement(XElement? element) => element is null ? null : new XElement(element);
-
-    private static void ReplaceChild(XElement parent, XName name, XElement? original)
+    private static void CopyRowFormatting(XElement? source, XElement target, XNamespace spreadsheet, int targetRow)
     {
-        var current = parent.Element(name);
-        if (current is not null)
+        if (source is null) return;
+        foreach (var attribute in source.Attributes().Where(x => x.Name.LocalName is "ht" or "customHeight" or "s" or "customFormat"))
+            target.SetAttributeValue(attribute.Name, attribute.Value);
+
+        for (var column = 1; column <= 8; column++)
         {
-            if (original is null) current.Remove();
-            else current.ReplaceWith(new XElement(original));
+            var sourceCell = FindCell(source, spreadsheet, column);
+            if (sourceCell is null) continue;
+            var cell = new XElement(sourceCell);
+            cell.SetAttributeValue("r", CellReference(column, targetRow));
+            cell.SetAttributeValue("t", null);
+            cell.RemoveNodes();
+            target.Add(cell);
         }
-        else if (original is not null)
+    }
+
+    private static void SetInlineString(XElement row, XNamespace spreadsheet, int column, string value, XElement? styleSource, int rowNumber)
+    {
+        var cell = GetOrCreateCell(row, spreadsheet, column, styleSource, rowNumber);
+        ClearCellContent(cell, spreadsheet);
+        cell.SetAttributeValue("t", "inlineStr");
+        var text = new XElement(spreadsheet + "t", value);
+        if (value.Length > 0 && (char.IsWhiteSpace(value[0]) || char.IsWhiteSpace(value[^1])))
+            text.SetAttributeValue(XNamespace.Xml + "space", "preserve");
+        AddCellContent(cell, spreadsheet, new XElement(spreadsheet + "is", text));
+    }
+
+    private static void SetNumeric(XElement row, XNamespace spreadsheet, int column, decimal value, XElement? styleSource, int rowNumber)
+    {
+        var cell = GetOrCreateCell(row, spreadsheet, column, styleSource, rowNumber);
+        ClearCellContent(cell, spreadsheet);
+        cell.SetAttributeValue("t", null);
+        AddCellContent(cell, spreadsheet, new XElement(spreadsheet + "v", value.ToString("0.############################", CultureInfo.InvariantCulture)));
+    }
+
+    private static void ClearCell(XElement row, XNamespace spreadsheet, int column, XElement? styleSource, int rowNumber)
+    {
+        var cell = GetOrCreateCell(row, spreadsheet, column, styleSource, rowNumber);
+        ClearCellContent(cell, spreadsheet);
+        cell.SetAttributeValue("t", null);
+    }
+
+    private static void ClearCellContent(XElement cell, XNamespace spreadsheet)
+    {
+        cell.SetAttributeValue("t", null);
+        cell.Element(spreadsheet + "f")?.Remove();
+        cell.Element(spreadsheet + "v")?.Remove();
+        cell.Element(spreadsheet + "is")?.Remove();
+    }
+
+    private static void AddCellContent(XElement cell, XNamespace spreadsheet, XElement content)
+    {
+        var extensionList = cell.Element(spreadsheet + "extLst");
+        if (extensionList is null) cell.Add(content);
+        else extensionList.AddBeforeSelf(content);
+    }
+
+    private static XElement GetOrCreateCell(XElement row, XNamespace spreadsheet, int column, XElement? styleSource, int rowNumber)
+    {
+        var existing = FindCell(row, spreadsheet, column);
+        if (existing is not null) return existing;
+
+        var source = styleSource is null ? null : FindCell(styleSource, spreadsheet, column);
+        var cell = source is null ? new XElement(spreadsheet + "c") : new XElement(source);
+        cell.SetAttributeValue("r", CellReference(column, rowNumber));
+        cell.SetAttributeValue("t", null);
+        cell.RemoveNodes();
+
+        var next = row.Elements(spreadsheet + "c").FirstOrDefault(x => ColumnNumber(x) > column);
+        if (next is null) row.Add(cell);
+        else next.AddBeforeSelf(cell);
+        return cell;
+    }
+
+    private static XElement? FindCell(XElement row, XNamespace spreadsheet, int column)
+        => row.Elements(spreadsheet + "c").FirstOrDefault(x => ColumnNumber(x) == column);
+
+    private static int RowNumber(XElement row)
+        => int.TryParse(row.Attribute("r")?.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var number) ? number : 0;
+
+    private static int ColumnNumber(XElement cell)
+    {
+        var reference = cell.Attribute("r")?.Value ?? string.Empty;
+        var number = 0;
+        foreach (var character in reference.TakeWhile(char.IsLetter))
+            number = number * 26 + (char.ToUpperInvariant(character) - 'A' + 1);
+        return number;
+    }
+
+    private static string CellReference(int column, int row)
+    {
+        var letters = string.Empty;
+        for (var current = column; current > 0; current = (current - 1) / 26)
+            letters = (char)('A' + (current - 1) % 26) + letters;
+        return $"{letters}{row}";
+    }
+
+    private static void ExpandDimension(XElement root, XNamespace spreadsheet, int targetRow, int targetColumn)
+    {
+        var dimension = root.Element(spreadsheet + "dimension");
+        if (dimension is null)
         {
-            parent.Add(new XElement(original));
+            dimension = new XElement(spreadsheet + "dimension");
+            var before = root.Elements().FirstOrDefault(x => x.Name == spreadsheet + "sheetViews" || x.Name == spreadsheet + "sheetData");
+            if (before is null) root.AddFirst(dimension);
+            else before.AddBeforeSelf(dimension);
+            dimension.SetAttributeValue("ref", $"A1:{CellReference(targetColumn, targetRow)}");
+            return;
         }
+
+        var range = (dimension.Attribute("ref")?.Value ?? "A1").Split(':');
+        var start = ParseCellReference(range[0]);
+        var end = ParseCellReference(range.Length > 1 ? range[1] : range[0]);
+        end = (Math.Max(end.Column, targetColumn), Math.Max(end.Row, targetRow));
+        dimension.SetAttributeValue("ref", $"{CellReference(start.Column, start.Row)}:{CellReference(end.Column, end.Row)}");
+    }
+
+    private static (int Column, int Row) ParseCellReference(string reference)
+    {
+        var column = 0;
+        var index = 0;
+        while (index < reference.Length && char.IsLetter(reference[index]))
+        {
+            column = column * 26 + (char.ToUpperInvariant(reference[index]) - 'A' + 1);
+            index++;
+        }
+        return (column, int.TryParse(reference[index..], NumberStyles.Integer, CultureInfo.InvariantCulture, out var row) ? row : 1);
     }
 
     private static string ResolveWorksheetPath(ZipArchive archive, string worksheetName)

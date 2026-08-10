@@ -34,6 +34,7 @@ public sealed class RealWorkbookCompatibilityTests
         Assert.True(before.EntryNames.All(after.EntryNames.Contains), "The saved workbook lost ZIP parts.");
         Assert.Equal(before.SheetNames, after.SheetNames);
         Assert.Equal(before.FormulaTexts, after.FormulaTexts);
+        Assert.True(before.StylesXml.SequenceEqual(after.StylesXml), "The saved workbook rewrote xl/styles.xml.");
         Assert.Equal(before.TargetSheet.StructureXml, after.TargetSheet.StructureXml);
         Assert.True(before.TargetSheet.ManualCells.All(pair =>
             after.TargetSheet.ManualCells.TryGetValue(pair.Key, out var value) && value == pair.Value),
@@ -51,6 +52,7 @@ public sealed class RealWorkbookCompatibilityTests
         IReadOnlyList<string> EntryNames,
         IReadOnlyList<string> SheetNames,
         IReadOnlyList<string> FormulaTexts,
+        byte[] StylesXml,
         SheetSnapshot TargetSheet)
     {
         public static WorkbookSnapshot Read(string path)
@@ -69,6 +71,7 @@ public sealed class RealWorkbookCompatibilityTests
             var targetSheet = sheets.Single(x => x.Attribute("name")?.Value == "中外运");
             var targetPath = relationshipTargets[targetSheet.Attribute(officeRelationships + "id")!.Value];
             var targetXml = LoadXml(archive, targetPath);
+            var stylesXml = LoadBytes(archive, "xl/styles.xml");
             var formulaTexts = archive.Entries
                 .Where(x => x.FullName.StartsWith("xl/worksheets/", StringComparison.OrdinalIgnoreCase) && x.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
                 .OrderBy(x => x.FullName, StringComparer.Ordinal)
@@ -79,6 +82,7 @@ public sealed class RealWorkbookCompatibilityTests
                 archive.Entries.Select(x => x.FullName).OrderBy(x => x, StringComparer.Ordinal).ToArray(),
                 sheetNames,
                 formulaTexts,
+                stylesXml,
                 SheetSnapshot.Read(targetXml, spreadsheet));
         }
 
@@ -86,6 +90,14 @@ public sealed class RealWorkbookCompatibilityTests
         {
             using var stream = archive.GetEntry(path)!.Open();
             return XDocument.Load(stream, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+        }
+
+        private static byte[] LoadBytes(ZipArchive archive, string path)
+        {
+            using var stream = archive.GetEntry(path)!.Open();
+            using var buffer = new MemoryStream();
+            stream.CopyTo(buffer);
+            return buffer.ToArray();
         }
 
         private static string ResolveWorksheetPath(string target)
