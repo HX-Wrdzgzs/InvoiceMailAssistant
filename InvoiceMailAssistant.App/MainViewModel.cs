@@ -111,6 +111,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
         OnPropertyChanged(string.Empty);
         await RefreshRecordsAsync();
+        await RepairCompletedRepeatedFormRecordsAsync();
         await RetryPendingAsync();
         StatusText = "就绪";
         _ = RunPollingLoopAsync(_lifetime.Token);
@@ -136,6 +137,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 await _credentials.DeleteAsync(previousMailbox, _lifetime.Token);
             if (!string.IsNullOrWhiteSpace(EmailAccount) && !string.IsNullOrWhiteSpace(Password))
                 await _credentials.SaveAsync(EmailAccount, Password);
+            await RepairCompletedRepeatedFormRecordsAsync();
+            await RefreshRecordsAsync();
             StatusText = "设置已保存";
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -174,6 +177,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (!automatic) StatusText = "正在检查邮件";
             var password = await ResolvePasswordAsync();
             var monitorFromUtc = monitorFromOverride ?? await EnsureMonitorStartAsync();
+            var repairedExisting = await RepairCompletedRepeatedFormRecordsAsync();
             var messages = await _mailbox.FetchCandidateMessagesAsync(EmailAccount, password, ImapHost, ImapPort, monitorFromUtc, 200, _lifetime.Token);
             var added = 0;
 
@@ -211,8 +215,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             _lastChecked = DateTime.Now;
             ConnectionText = $"已连接：{EmailAccount.Trim()}";
             if (added > 0) NewApplicationsFound?.Invoke(added);
-            if (!automatic || added > 0 || repaired > 0)
-                StatusText = $"检查完成，本次发现 {added} 条新申请，重新处理 {repaired} 条失败记录";
+            if (!automatic || added > 0 || repaired > 0 || repairedExisting > 0)
+                StatusText = $"检查完成，本次发现 {added} 条新申请，修复 {repairedExisting} 条历史记录，重新处理 {repaired} 条失败记录";
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -252,6 +256,70 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         foreach (var item in pending)
             await TryWriteExcelAsync(item);
     }
+
+    private async Task<int> RepairCompletedRepeatedFormRecordsAsync()
+    {
+        if (string.IsNullOrWhiteSpace(ExcelPath) || !File.Exists(ExcelPath)) return 0;
+
+        var candidates = await _repository.GetCompletedRepeatedFormRecordsAsync(_lifetime.Token);
+        var repaired = 0;
+        foreach (var original in candidates)
+        {
+            var parsed = _parser.Parse(
+                new MailEnvelope(
+                    original.ImapUid,
+                    original.MessageId,
+                    original.MailFrom,
+                    original.MailSubject,
+                    original.MailReceivedAt,
+                    original.NormalizedBody,
+                    original.UidValidity,
+                    original.MailboxName),
+                original.MailboxIdentity);
+            if (!parsed.Success || parsed.Application is null) continue;
+
+            var corrected = parsed.Application;
+            if (BusinessFieldsEqual(original, corrected)) continue;
+
+            corrected.Id = original.Id;
+            corrected.ExcelRow = original.ExcelRow;
+            corrected.CreatedAt = original.CreatedAt;
+            try
+            {
+                // Repair the existing row only after confirming its A/B/C/D/F
+                // values still match the old database record. This prevents a
+                // manual edit from being mistaken for the stale parser output.
+                await _excel.RepairExistingRowAsync(original, corrected, ExcelPath, WorksheetName, _lifetime.Token);
+                await _repository.UpdateParsedAsync(original.Id, corrected, Deduplication.CreateFallbackHash(corrected), _lifetime.Token);
+                await _repository.UpdateStatusAsync(original.Id, ProcessingStatus.Completed, excelRow: corrected.ExcelRow, cancellationToken: _lifetime.Token);
+                repaired++;
+            }
+            catch (ExcelRowOccupiedException)
+            {
+                // Keep the old completed record and leave the user's row
+                // untouched. The mismatch must be resolved manually.
+            }
+            catch (IOException)
+            {
+                // A locked/missing workbook is handled by the normal pending
+                // workflow after the user restores access to the file.
+            }
+        }
+
+        return repaired;
+    }
+
+    private static bool BusinessFieldsEqual(InvoiceApplication first, InvoiceApplication second)
+        => string.Equals(first.CompanyName, second.CompanyName, StringComparison.Ordinal)
+            && string.Equals(first.CreditCode, second.CreditCode, StringComparison.Ordinal)
+            && first.Amount == second.Amount
+            && first.ApplyTime == second.ApplyTime
+            && string.Equals(first.InvoiceType, second.InvoiceType, StringComparison.Ordinal)
+            && string.Equals(first.Recipient, second.Recipient, StringComparison.Ordinal)
+            && string.Equals(first.Phone, second.Phone, StringComparison.Ordinal)
+            && string.Equals(first.Address, second.Address, StringComparison.Ordinal)
+            && string.Equals(first.Email, second.Email, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(first.Remark, second.Remark, StringComparison.Ordinal);
 
     private async Task ScanHistoryAsync(int days)
     {

@@ -157,17 +157,50 @@ public sealed partial class InvoiceParser
 
     private static Dictionary<string, string> ParseLabelValues(string body)
     {
-        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        // Some real Tencent enterprise-mail messages contain several rendered
+        // copies of the application form in one MIME body.  The earlier
+        // implementation flattened all copies and kept the first non-empty
+        // value, which could select an old/template block while selecting the
+        // e-mail address from a later block whose earlier copies were empty.
+        // Keep form blocks separate and prefer the last complete block so the
+        // fields remain internally consistent.
+        var blocks = new List<Dictionary<string, string>>();
+        var current = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var line in body.Split('\n'))
         {
             var index = line.IndexOfAny(['：', ':']);
             if (index <= 0) continue;
             var label = line[..index].Trim();
             var value = line[(index + 1)..].Trim();
-            if (!result.TryGetValue(label, out var existing) || string.IsNullOrWhiteSpace(existing))
-                result[label] = value;
+            if (label == "公司名称" && current.Count > 0)
+            {
+                blocks.Add(current);
+                current = new Dictionary<string, string>(StringComparer.Ordinal);
+            }
+
+            if (!current.TryGetValue(label, out var existing) || string.IsNullOrWhiteSpace(existing))
+                current[label] = value;
         }
-        return result;
+
+        if (current.Count > 0) blocks.Add(current);
+
+        var completeBlock = blocks.LastOrDefault(block => RequiredFields.All(field =>
+            block.TryGetValue(field, out var value) && !string.IsNullOrWhiteSpace(value)));
+        if (completeBlock is not null) return completeBlock;
+
+        // Preserve useful missing-field diagnostics for malformed messages
+        // that do not contain one complete application block.
+        var aggregate = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var block in blocks)
+        {
+            foreach (var pair in block)
+            {
+                if (!aggregate.TryGetValue(pair.Key, out var existing) || string.IsNullOrWhiteSpace(existing))
+                    aggregate[pair.Key] = pair.Value;
+            }
+        }
+
+        return aggregate;
     }
 
     private static string Get(Dictionary<string, string> values, string key) => values.TryGetValue(key, out var value) ? value.Trim() : string.Empty;

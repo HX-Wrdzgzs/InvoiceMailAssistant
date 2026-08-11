@@ -231,6 +231,70 @@ public sealed class ExcelWriterTests
     }
 
     [Fact]
+    public async Task RepairsExistingParsedRowWithoutOverwritingManualColumns()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"invoice-mail-{Guid.NewGuid():N}.xlsx");
+        try
+        {
+            using (var workbook = new XLWorkbook())
+            {
+                var sourceSheet = workbook.AddWorksheet("中外运");
+                sourceSheet.Cell(1, 1).Value = "日期";
+                sourceSheet.Cell(2, 1).Value = "1.1";
+                sourceSheet.Cell(2, 2).Value = "江苏慧世联网络科技有限公司";
+                sourceSheet.Cell(2, 3).Value = "XXXXXXXXXX";
+                sourceSheet.Cell(2, 4).Value = 300m;
+                sourceSheet.Cell(2, 5).Value = "人工到账时间";
+                sourceSheet.Cell(2, 6).Value = "old@example.com";
+                sourceSheet.Cell(2, 7).Value = "是";
+                sourceSheet.Cell(2, 8).Value = "否";
+                workbook.SaveAs(path);
+            }
+
+            var original = new InvoiceApplication
+            {
+                CompanyName = "江苏慧世联网络科技有限公司",
+                CreditCode = "XXXXXXXXXX",
+                Amount = 300m,
+                ApplyTime = new DateTime(2023, 1, 1, 15, 0, 0),
+                Email = "old@example.com",
+                ExcelRow = 2
+            };
+            var corrected = new InvoiceApplication
+            {
+                CompanyName = "艾洛（天津）国际物流有限公司",
+                CreditCode = "91120102MA7GXAJX2F",
+                Amount = 300m,
+                ApplyTime = new DateTime(2026, 8, 10, 15, 11, 0),
+                Email = "yoyo.guo@auroragroup-cn.com",
+                ExcelRow = 2
+            };
+
+            var writer = new ExcelWriter();
+            await writer.RepairExistingRowAsync(original, corrected, path, "中外运");
+
+            using var verify = new XLWorkbook(path);
+            var sheet = verify.Worksheet("中外运");
+            Assert.Equal("8.10", sheet.Cell(2, 1).GetString());
+            Assert.Equal(corrected.CompanyName, sheet.Cell(2, 2).GetString());
+            Assert.Equal(corrected.CreditCode, sheet.Cell(2, 3).GetString());
+            Assert.Equal(corrected.Amount, sheet.Cell(2, 4).GetValue<decimal>());
+            Assert.Equal("人工到账时间", sheet.Cell(2, 5).GetString());
+            Assert.Equal(corrected.Email, sheet.Cell(2, 6).GetString());
+            Assert.Equal("是", sheet.Cell(2, 7).GetString());
+            Assert.Equal("否", sheet.Cell(2, 8).GetString());
+
+            // A database update can fail after the Excel replacement. The
+            // repair operation must therefore be idempotent on retry.
+            await writer.RepairExistingRowAsync(original, corrected, path, "中外运");
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task ConcurrentDifferentApplicationsCannotOverwriteTheSameRow()
     {
         var path = Path.Combine(Path.GetTempPath(), $"invoice-mail-{Guid.NewGuid():N}.xlsx");

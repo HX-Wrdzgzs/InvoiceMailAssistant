@@ -399,6 +399,18 @@ public sealed class SqliteInvoiceRepository(string databasePath)
         return result;
     }
 
+    public async Task<IReadOnlyList<InvoiceApplication>> GetCompletedRepeatedFormRecordsAsync(CancellationToken cancellationToken = default)
+    {
+        var result = new List<InvoiceApplication>();
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT * FROM invoice_applications WHERE processing_status = $status AND normalized_body LIKE '%公司名称%公司名称%' ORDER BY id;";
+        command.Parameters.AddWithValue("$status", (int)ProcessingStatus.Completed);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) result.Add(Map(reader));
+        return result;
+    }
+
     public async Task UpdateParsedAsync(long id, InvoiceApplication app, string fallbackHash, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenConnectionAsync(cancellationToken);
@@ -592,6 +604,60 @@ public sealed class ExcelWriter
         }
 
         return Math.Max(lastUsed + 1, 2);
+    }
+
+    public async Task RepairExistingRowAsync(
+        InvoiceApplication original,
+        InvoiceApplication corrected,
+        string filePath,
+        string worksheetName,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (original.ExcelRow is not int targetRow || targetRow < 2)
+            throw new InvalidOperationException("历史记录没有可验证的 Excel 行号。");
+
+        var ownedLock = await AcquireWriteLockAsync(cancellationToken);
+
+        var directory = Path.GetDirectoryName(filePath)!;
+        var tempPath = Path.Combine(directory, $".{Path.GetFileName(filePath)}.{Guid.NewGuid():N}.tmp.xlsx");
+        try
+        {
+            EnsureWritable(filePath);
+            File.Copy(filePath, tempPath, true);
+
+            DateTime? previousDate;
+            using (var workbook = new XLWorkbook(tempPath))
+            {
+                if (!workbook.Worksheets.TryGetWorksheet(worksheetName, out var worksheet))
+                    throw new InvalidOperationException($"工作表不存在：{worksheetName}");
+
+                if (RowMatches(worksheet, targetRow, corrected)) return;
+                if (!RowMatches(worksheet, targetRow, original))
+                    throw new ExcelRowOccupiedException($"Excel 第 {targetRow} 行与历史记录不一致，已停止自动修复以保护人工数据。");
+
+                previousDate = FindPreviousApplicationDate(worksheet, targetRow - 1, corrected.ApplyTime.Year);
+            }
+
+            PatchWorksheetXml(tempPath, worksheetName, corrected, targetRow, previousDate);
+
+            using (var verify = new XLWorkbook(tempPath))
+            {
+                var verifySheet = verify.Worksheet(worksheetName);
+                if (!RowMatches(verifySheet, targetRow, corrected))
+                    throw new InvalidDataException("Excel 历史记录修复校验失败：目标行内容不一致。");
+            }
+
+            using (var durable = new FileStream(tempPath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read))
+                durable.Flush(true);
+
+            File.Replace(tempPath, filePath, null, true);
+        }
+        finally
+        {
+            if (File.Exists(tempPath)) File.Delete(tempPath);
+            ownedLock?.Dispose();
+        }
     }
 
     public async Task<int> WriteAsync(InvoiceApplication application, string filePath, string worksheetName, CancellationToken cancellationToken = default, ExcelWriterLock? writeLock = null)
