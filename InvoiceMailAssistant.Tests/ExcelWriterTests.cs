@@ -1,5 +1,7 @@
 using ClosedXML.Excel;
 using System.IO.Compression;
+using System.Text;
+using System.Xml.Linq;
 using InvoiceMailAssistant.App;
 using Xunit;
 
@@ -393,7 +395,7 @@ public sealed class ExcelWriterTests
     }
 
     [Fact]
-    public async Task PatchingRowsDoesNotRewriteStylesPart()
+    public async Task WritesBoldCompanyCreditAndMailtoHyperlink()
     {
         var path = Path.Combine(Path.GetTempPath(), $"invoice-mail-{Guid.NewGuid():N}.xlsx");
         try
@@ -413,9 +415,29 @@ public sealed class ExcelWriterTests
             await new ExcelWriter().WriteAsync(application, path, "中外运");
             var stylesAfter = ReadZipEntry(path, "xl/styles.xml");
 
-            Assert.Equal(stylesBefore, stylesAfter);
             using var verify = new XLWorkbook(path);
-            Assert.Equal(application.CompanyName, verify.Worksheet("中外运").Cell(2, 2).GetString());
+            var verifySheet = verify.Worksheet("中外运");
+            Assert.Equal(application.CompanyName, verifySheet.Cell(2, 2).GetString());
+            Assert.True(verifySheet.Cell(2, 2).Style.Font.Bold);
+            Assert.True(verifySheet.Cell(2, 3).Style.Font.Bold);
+
+            var worksheet = XDocument.Parse(Encoding.UTF8.GetString(ReadZipEntry(path, "xl/worksheets/sheet1.xml")).TrimStart('\uFEFF'));
+            XNamespace spreadsheet = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+            XNamespace officeRelationships = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+            var hyperlink = worksheet.Descendants(spreadsheet + "hyperlink")
+                .Single(x => x.Attribute("ref")?.Value == "F2");
+            var relationshipId = hyperlink.Attribute(officeRelationships + "id")?.Value;
+            Assert.False(string.IsNullOrWhiteSpace(relationshipId));
+
+            var relationships = XDocument.Parse(Encoding.UTF8.GetString(ReadZipEntry(path, "xl/worksheets/_rels/sheet1.xml.rels")).TrimStart('\uFEFF'));
+            XNamespace packageRelationships = "http://schemas.openxmlformats.org/package/2006/relationships";
+            Assert.Equal(
+                "mailto:finance@example.com",
+                relationships.Descendants(packageRelationships + "Relationship")
+                    .Single(x => x.Attribute("Id")?.Value == relationshipId)
+                    .Attribute("Target")?.Value);
+
+            Assert.NotEqual(stylesBefore, stylesAfter);
         }
         finally
         {

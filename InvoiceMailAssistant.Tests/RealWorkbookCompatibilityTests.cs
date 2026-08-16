@@ -34,7 +34,17 @@ public sealed class RealWorkbookCompatibilityTests
         Assert.True(before.EntryNames.All(after.EntryNames.Contains), "The saved workbook lost ZIP parts.");
         Assert.Equal(before.SheetNames, after.SheetNames);
         Assert.Equal(before.FormulaTexts, after.FormulaTexts);
-        Assert.True(before.StylesXml.SequenceEqual(after.StylesXml), "The saved workbook rewrote xl/styles.xml.");
+        var beforeStyles = XDocument.Load(new MemoryStream(before.StylesXml));
+        var afterStyles = XDocument.Load(new MemoryStream(after.StylesXml));
+        XNamespace spreadsheet = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        Assert.True(
+            afterStyles.Root!.Element(spreadsheet + "fonts")!.Elements(spreadsheet + "font").Count()
+                >= beforeStyles.Root!.Element(spreadsheet + "fonts")!.Elements(spreadsheet + "font").Count(),
+            "The output font definition was not preserved.");
+        Assert.True(
+            afterStyles.Root!.Element(spreadsheet + "cellXfs")!.Elements(spreadsheet + "xf").Count()
+                >= beforeStyles.Root!.Element(spreadsheet + "cellXfs")!.Elements(spreadsheet + "xf").Count(),
+            "The output cell style definition was not preserved.");
         Assert.Equal(before.TargetSheet.StructureXml, after.TargetSheet.StructureXml);
         Assert.True(before.TargetSheet.ManualCells.All(pair =>
             after.TargetSheet.ManualCells.TryGetValue(pair.Key, out var value) && value == pair.Value),
@@ -46,6 +56,8 @@ public sealed class RealWorkbookCompatibilityTests
         Assert.Equal(application.CreditCode, sheet.Cell(writtenRow, 3).GetString());
         Assert.Equal(application.Amount, sheet.Cell(writtenRow, 4).GetValue<decimal>());
         Assert.Equal(application.Email, sheet.Cell(writtenRow, 6).GetString());
+        Assert.True(sheet.Cell(writtenRow, 2).Style.Font.Bold);
+        Assert.True(sheet.Cell(writtenRow, 3).Style.Font.Bold);
     }
 
     private sealed record WorkbookSnapshot(

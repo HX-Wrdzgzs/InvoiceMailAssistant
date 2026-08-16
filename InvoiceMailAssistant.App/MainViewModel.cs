@@ -25,8 +25,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private string _connectionText = "未连接";
     private DateTime? _lastChecked;
     private bool _listening = true;
-    private int _customHistoryDays = 7;
-
     public event PropertyChangedEventHandler? PropertyChanged;
     public event Action<int>? NewApplicationsFound;
     public ObservableCollection<InvoiceApplication> Records { get; } = [];
@@ -36,9 +34,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public ICommand SaveSettingsCommand { get; }
     public ICommand RetryPendingCommand { get; }
     public ICommand ToggleListeningCommand { get; }
-    public ICommand Scan7DaysCommand { get; }
-    public ICommand Scan30DaysCommand { get; }
-    public ICommand ScanCustomCommand { get; }
+    public ICommand Scan2DaysCommand { get; }
     public ICommand ReparseFailedCommand { get; }
 
     public MainViewModel()
@@ -50,9 +46,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         TestConnectionCommand = new AsyncRelayCommand(TestConnectionAsync);
         SaveSettingsCommand = new AsyncRelayCommand(SaveSettingsAsync);
         RetryPendingCommand = new AsyncRelayCommand(RetryPendingAsync);
-        Scan7DaysCommand = new AsyncRelayCommand(() => ScanHistoryAsync(7));
-        Scan30DaysCommand = new AsyncRelayCommand(() => ScanHistoryAsync(30));
-        ScanCustomCommand = new AsyncRelayCommand(() => ScanHistoryAsync(CustomHistoryDays));
+        Scan2DaysCommand = new AsyncRelayCommand(() => ScanHistoryAsync(2));
         ReparseFailedCommand = new AsyncRelayCommand(ReparseFailedAsync);
         ToggleListeningCommand = new RelayCommand(() =>
         {
@@ -69,7 +63,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public string WorksheetName { get => _settings.WorksheetName; set { _settings.WorksheetName = value; OnPropertyChanged(); } }
     public int PollSeconds { get => _settings.PollSeconds; set { _settings.PollSeconds = Math.Clamp(value, 30, 300); OnPropertyChanged(); } }
     public bool RunAtStartup { get => _settings.RunAtStartup; set { _settings.RunAtStartup = value; OnPropertyChanged(); } }
-    public int CustomHistoryDays { get => _customHistoryDays; set { _customHistoryDays = Math.Clamp(value, 1, 3650); OnPropertyChanged(); } }
     public string StatusText { get => _statusText; private set { _statusText = value; OnPropertyChanged(); } }
     public string ConnectionText { get => _connectionText; private set { _connectionText = value; OnPropertyChanged(); } }
     public bool Listening { get => _listening; set { _listening = value; OnPropertyChanged(); OnPropertyChanged(nameof(ListeningButtonText)); } }
