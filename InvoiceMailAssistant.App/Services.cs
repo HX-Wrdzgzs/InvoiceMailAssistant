@@ -399,6 +399,18 @@ public sealed class SqliteInvoiceRepository(string databasePath)
         return result;
     }
 
+    public async Task<IReadOnlyList<InvoiceApplication>> GetCompletedRepeatedFormRecordsAsync(CancellationToken cancellationToken = default)
+    {
+        var result = new List<InvoiceApplication>();
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT * FROM invoice_applications WHERE processing_status = $status AND normalized_body LIKE '%公司名称%公司名称%' ORDER BY id;";
+        command.Parameters.AddWithValue("$status", (int)ProcessingStatus.Completed);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) result.Add(Map(reader));
+        return result;
+    }
+
     public async Task UpdateParsedAsync(long id, InvoiceApplication app, string fallbackHash, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenConnectionAsync(cancellationToken);
@@ -548,6 +560,12 @@ public sealed class ExcelWriterLock : IDisposable
 public sealed class ExcelWriter
 {
     private const string LockName = "Local\\InvoiceMailAssistant.ExcelWrite";
+    private const string SpreadsheetNamespace = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+    private const string OfficeRelationshipsNamespace = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    private const string PackageRelationshipsNamespace = "http://schemas.openxmlformats.org/package/2006/relationships";
+    private const string HyperlinkRelationshipType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
+
+    private sealed record OutputStyles(int BoldTextStyleId, int HyperlinkStyleId);
 
     public async Task<ExcelWriterLock> AcquireWriteLockAsync(CancellationToken cancellationToken = default)
     {
@@ -592,6 +610,60 @@ public sealed class ExcelWriter
         }
 
         return Math.Max(lastUsed + 1, 2);
+    }
+
+    public async Task RepairExistingRowAsync(
+        InvoiceApplication original,
+        InvoiceApplication corrected,
+        string filePath,
+        string worksheetName,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (original.ExcelRow is not int targetRow || targetRow < 2)
+            throw new InvalidOperationException("历史记录没有可验证的 Excel 行号。");
+
+        var ownedLock = await AcquireWriteLockAsync(cancellationToken);
+
+        var directory = Path.GetDirectoryName(filePath)!;
+        var tempPath = Path.Combine(directory, $".{Path.GetFileName(filePath)}.{Guid.NewGuid():N}.tmp.xlsx");
+        try
+        {
+            EnsureWritable(filePath);
+            File.Copy(filePath, tempPath, true);
+
+            DateTime? previousDate;
+            using (var workbook = new XLWorkbook(tempPath))
+            {
+                if (!workbook.Worksheets.TryGetWorksheet(worksheetName, out var worksheet))
+                    throw new InvalidOperationException($"工作表不存在：{worksheetName}");
+
+                if (RowMatches(worksheet, targetRow, corrected)) return;
+                if (!RowMatches(worksheet, targetRow, original))
+                    throw new ExcelRowOccupiedException($"Excel 第 {targetRow} 行与历史记录不一致，已停止自动修复以保护人工数据。");
+
+                previousDate = FindPreviousApplicationDate(worksheet, targetRow - 1, corrected.ApplyTime.Year);
+            }
+
+            PatchWorksheetXml(tempPath, worksheetName, corrected, targetRow, previousDate);
+
+            using (var verify = new XLWorkbook(tempPath))
+            {
+                var verifySheet = verify.Worksheet(worksheetName);
+                if (!RowMatches(verifySheet, targetRow, corrected))
+                    throw new InvalidDataException("Excel 历史记录修复校验失败：目标行内容不一致。");
+            }
+
+            using (var durable = new FileStream(tempPath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read))
+                durable.Flush(true);
+
+            File.Replace(tempPath, filePath, null, true);
+        }
+        finally
+        {
+            if (File.Exists(tempPath)) File.Delete(tempPath);
+            ownedLock?.Dispose();
+        }
     }
 
     public async Task<int> WriteAsync(InvoiceApplication application, string filePath, string worksheetName, CancellationToken cancellationToken = default, ExcelWriterLock? writeLock = null)
@@ -729,7 +801,7 @@ public sealed class ExcelWriter
         using (var stream = entry.Open())
             document = XDocument.Load(stream, System.Xml.Linq.LoadOptions.PreserveWhitespace);
 
-        XNamespace spreadsheet = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        XNamespace spreadsheet = SpreadsheetNamespace;
         var root = document.Root ?? throw new InvalidDataException($"工作表 XML 无根节点：{worksheetName}");
         var sheetData = root.Element(spreadsheet + "sheetData")
             ?? throw new InvalidDataException($"工作表 XML 缺少 sheetData：{worksheetName}");
@@ -746,15 +818,21 @@ public sealed class ExcelWriter
             else next.AddBeforeSelf(target);
         }
 
+        var outputStyles = EnsureOutputStyles(
+            archive,
+            GetStyleId(FindCell(target, spreadsheet, 2)) ?? GetStyleId(FindCell(previous, spreadsheet, 2)),
+            GetStyleId(FindCell(target, spreadsheet, 6)) ?? GetStyleId(FindCell(previous, spreadsheet, 6)));
+
         if (previousDate?.Date != application.ApplyTime.Date)
             SetInlineString(target, spreadsheet, 1, $"{application.ApplyTime.Month}.{application.ApplyTime.Day}", previous, targetRow);
         else
             ClearCell(target, spreadsheet, 1, previous, targetRow);
 
-        SetInlineString(target, spreadsheet, 2, application.CompanyName, previous, targetRow);
-        SetInlineString(target, spreadsheet, 3, application.CreditCode, previous, targetRow);
+        SetInlineString(target, spreadsheet, 2, application.CompanyName, previous, targetRow, outputStyles.BoldTextStyleId);
+        SetInlineString(target, spreadsheet, 3, application.CreditCode, previous, targetRow, outputStyles.BoldTextStyleId);
         SetNumeric(target, spreadsheet, 4, application.Amount, previous, targetRow);
-        SetInlineString(target, spreadsheet, 6, application.Email, previous, targetRow);
+        SetInlineString(target, spreadsheet, 6, application.Email, previous, targetRow, outputStyles.HyperlinkStyleId);
+        UpsertEmailHyperlink(archive, worksheetPath, root, targetRow, application.Email);
         ExpandDimension(root, spreadsheet, targetRow, 8);
 
         entry.Delete();
@@ -781,15 +859,190 @@ public sealed class ExcelWriter
         }
     }
 
-    private static void SetInlineString(XElement row, XNamespace spreadsheet, int column, string value, XElement? styleSource, int rowNumber)
+    private static void SetInlineString(XElement row, XNamespace spreadsheet, int column, string value, XElement? styleSource, int rowNumber, int? styleId = null)
     {
         var cell = GetOrCreateCell(row, spreadsheet, column, styleSource, rowNumber);
         ClearCellContent(cell, spreadsheet);
+        if (styleId is int outputStyleId) cell.SetAttributeValue("s", outputStyleId);
         cell.SetAttributeValue("t", "inlineStr");
         var text = new XElement(spreadsheet + "t", value);
         if (value.Length > 0 && (char.IsWhiteSpace(value[0]) || char.IsWhiteSpace(value[^1])))
             text.SetAttributeValue(XNamespace.Xml + "space", "preserve");
         AddCellContent(cell, spreadsheet, new XElement(spreadsheet + "is", text));
+    }
+
+    private static OutputStyles EnsureOutputStyles(ZipArchive archive, int? baseTextStyleId, int? baseEmailStyleId)
+    {
+        var document = LoadXmlEntry(archive, "xl/styles.xml");
+        XNamespace spreadsheet = SpreadsheetNamespace;
+        var root = document.Root ?? throw new InvalidDataException("Excel 样式 XML 无根节点。");
+        var fonts = root.Element(spreadsheet + "fonts") ?? throw new InvalidDataException("Excel 样式 XML 缺少 fonts。");
+        var cellXfs = root.Element(spreadsheet + "cellXfs") ?? throw new InvalidDataException("Excel 样式 XML 缺少 cellXfs。");
+
+        var boldTextStyleId = EnsureStyleVariant(
+            fonts,
+            cellXfs,
+            baseTextStyleId ?? 0,
+            font => EnsureBoldFont(font, spreadsheet));
+        var hyperlinkStyleId = EnsureStyleVariant(
+            fonts,
+            cellXfs,
+            baseEmailStyleId ?? boldTextStyleId,
+            font => EnsureHyperlinkFont(font, spreadsheet));
+
+        fonts.SetAttributeValue("count", fonts.Elements(spreadsheet + "font").Count());
+        cellXfs.SetAttributeValue("count", cellXfs.Elements(spreadsheet + "xf").Count());
+        SaveXmlEntry(archive, "xl/styles.xml", document);
+        return new OutputStyles(boldTextStyleId, hyperlinkStyleId);
+    }
+
+    private static int EnsureStyleVariant(XElement fonts, XElement cellXfs, int baseStyleId, Action<XElement> mutateFont)
+    {
+        XNamespace spreadsheet = SpreadsheetNamespace;
+        var styles = cellXfs.Elements(spreadsheet + "xf").ToList();
+        var baseStyle = baseStyleId >= 0 && baseStyleId < styles.Count ? styles[baseStyleId] : styles[0];
+        var fontId = int.TryParse(baseStyle.Attribute("fontId")?.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedFontId)
+            ? parsedFontId
+            : 0;
+        var sourceFonts = fonts.Elements(spreadsheet + "font").ToList();
+        var font = fontId >= 0 && fontId < sourceFonts.Count
+            ? new XElement(sourceFonts[fontId])
+            : new XElement(spreadsheet + "font");
+        mutateFont(font);
+
+        var existingFont = sourceFonts.FindIndex(candidate => XNode.DeepEquals(candidate, font));
+        if (existingFont < 0)
+        {
+            existingFont = sourceFonts.Count;
+            fonts.Add(font);
+        }
+
+        var variant = new XElement(baseStyle);
+        variant.SetAttributeValue("fontId", existingFont);
+        var existingStyle = styles.FindIndex(candidate => XNode.DeepEquals(candidate, variant));
+        if (existingStyle >= 0) return existingStyle;
+
+        var styleId = styles.Count;
+        cellXfs.Add(variant);
+        return styleId;
+    }
+
+    private static void EnsureBoldFont(XElement font, XNamespace spreadsheet)
+    {
+        if (font.Element(spreadsheet + "b") is null)
+            font.AddFirst(new XElement(spreadsheet + "b"));
+    }
+
+    private static void EnsureHyperlinkFont(XElement font, XNamespace spreadsheet)
+    {
+        EnsureBoldFont(font, spreadsheet);
+        if (font.Element(spreadsheet + "u") is null)
+        {
+            var anchor = font.Elements().FirstOrDefault(x => x.Name == spreadsheet + "sz" || x.Name == spreadsheet + "color" || x.Name == spreadsheet + "name");
+            if (anchor is null) font.Add(new XElement(spreadsheet + "u"));
+            else anchor.AddBeforeSelf(new XElement(spreadsheet + "u"));
+        }
+
+        var color = font.Element(spreadsheet + "color");
+        if (color is null)
+        {
+            var size = font.Element(spreadsheet + "sz");
+            color = new XElement(spreadsheet + "color");
+            if (size is null) font.Add(color);
+            else size.AddAfterSelf(color);
+        }
+        color.RemoveAttributes();
+        color.SetAttributeValue("rgb", "FF267EF0");
+    }
+
+    private static int? GetStyleId(XElement? cell)
+        => int.TryParse(cell?.Attribute("s")?.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var styleId)
+            ? styleId
+            : null;
+
+    private static void UpsertEmailHyperlink(ZipArchive archive, string worksheetPath, XElement worksheetRoot, int rowNumber, string email)
+    {
+        XNamespace spreadsheet = SpreadsheetNamespace;
+        XNamespace officeRelationships = OfficeRelationshipsNamespace;
+        XNamespace packageRelationships = PackageRelationshipsNamespace;
+        var cellReference = CellReference(6, rowNumber);
+        var hyperlinks = worksheetRoot.Element(spreadsheet + "hyperlinks");
+        if (hyperlinks is null)
+        {
+            hyperlinks = new XElement(spreadsheet + "hyperlinks");
+            var anchor = worksheetRoot.Elements().FirstOrDefault(element => element.Name.LocalName is
+                "printOptions" or "pageMargins" or "pageSetup" or "headerFooter" or "rowBreaks" or "colBreaks" or
+                "drawing" or "legacyDrawing" or "legacyDrawingHF" or "picture" or "oleObjects" or "controls" or
+                "webPublishItems" or "tableParts" or "extLst");
+            if (anchor is null) worksheetRoot.Add(hyperlinks);
+            else anchor.AddBeforeSelf(hyperlinks);
+        }
+
+        var oldHyperlink = hyperlinks.Elements(spreadsheet + "hyperlink")
+            .SingleOrDefault(element => string.Equals(element.Attribute("ref")?.Value, cellReference, StringComparison.OrdinalIgnoreCase));
+        var oldRelationshipId = oldHyperlink?.Attribute(officeRelationships + "id")?.Value;
+        oldHyperlink?.Remove();
+
+        var relationshipPath = RelationshipPath(worksheetPath);
+        var relationshipEntry = archive.GetEntry(relationshipPath);
+        var relationships = relationshipEntry is null
+            ? new XDocument(new XElement(packageRelationships + "Relationships"))
+            : LoadXmlEntry(archive, relationshipPath);
+        var relationshipRoot = relationships.Root ?? throw new InvalidDataException("Excel 工作表关系 XML 无根节点。");
+
+        if (!string.IsNullOrWhiteSpace(oldRelationshipId)
+            && !hyperlinks.Elements(spreadsheet + "hyperlink").Any(element => string.Equals(element.Attribute(officeRelationships + "id")?.Value, oldRelationshipId, StringComparison.Ordinal)))
+        {
+            relationshipRoot.Elements(packageRelationships + "Relationship")
+                .Where(element => string.Equals(element.Attribute("Id")?.Value, oldRelationshipId, StringComparison.Ordinal))
+                .Remove();
+        }
+
+        if (!string.IsNullOrWhiteSpace(email))
+        {
+            var relationshipId = NextRelationshipId(relationshipRoot, packageRelationships);
+            relationshipRoot.Add(new XElement(
+                packageRelationships + "Relationship",
+                new XAttribute("Id", relationshipId),
+                new XAttribute("Type", HyperlinkRelationshipType),
+                new XAttribute("Target", "mailto:" + email.Trim()),
+                new XAttribute("TargetMode", "External")));
+            hyperlinks.Add(new XElement(
+                spreadsheet + "hyperlink",
+                new XAttribute("ref", cellReference),
+                new XAttribute(officeRelationships + "id", relationshipId),
+                new XAttribute("display", email.Trim()),
+                new XAttribute("tooltip", "mailto:" + email.Trim())));
+        }
+
+        SaveXmlEntry(archive, relationshipPath, relationships);
+    }
+
+    private static string NextRelationshipId(XElement relationshipRoot, XNamespace packageRelationships)
+    {
+        var max = relationshipRoot.Elements(packageRelationships + "Relationship")
+            .Select(element => element.Attribute("Id")?.Value)
+            .Select(value => value is not null && value.StartsWith("rId", StringComparison.Ordinal)
+                && int.TryParse(value[3..], NumberStyles.Integer, CultureInfo.InvariantCulture, out var number) ? number : 0)
+            .DefaultIfEmpty(0)
+            .Max();
+        return $"rId{max + 1}";
+    }
+
+    private static string RelationshipPath(string worksheetPath)
+    {
+        var separator = worksheetPath.LastIndexOf('/');
+        return separator < 0
+            ? "_rels/" + worksheetPath + ".rels"
+            : worksheetPath[..(separator + 1)] + "_rels/" + worksheetPath[(separator + 1)..] + ".rels";
+    }
+
+    private static void SaveXmlEntry(ZipArchive archive, string path, XDocument document)
+    {
+        archive.GetEntry(path)?.Delete();
+        var replacement = archive.CreateEntry(path, CompressionLevel.Optimal);
+        using var output = replacement.Open();
+        document.Save(output, System.Xml.Linq.SaveOptions.DisableFormatting);
     }
 
     private static void SetNumeric(XElement row, XNamespace spreadsheet, int column, decimal value, XElement? styleSource, int rowNumber)
@@ -839,8 +1092,8 @@ public sealed class ExcelWriter
         return cell;
     }
 
-    private static XElement? FindCell(XElement row, XNamespace spreadsheet, int column)
-        => row.Elements(spreadsheet + "c").FirstOrDefault(x => ColumnNumber(x) == column);
+    private static XElement? FindCell(XElement? row, XNamespace spreadsheet, int column)
+        => row?.Elements(spreadsheet + "c").FirstOrDefault(x => ColumnNumber(x) == column);
 
     private static int RowNumber(XElement row)
         => int.TryParse(row.Attribute("r")?.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var number) ? number : 0;

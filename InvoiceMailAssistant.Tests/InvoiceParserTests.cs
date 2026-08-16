@@ -119,6 +119,39 @@ public sealed class InvoiceParserTests
     }
 
     [Fact]
+    public void UsesLastCompleteApplicationBlockWhenBodyRepeatsAnOldTemplate()
+    {
+        const string body = """
+            中外运向您提交了开票申请，申请信息如下：
+            公司名称：江苏慧世联网络科技有限公司
+            信用代码：XXXXXXXXXX
+            申请金额：300
+            申请时间：2023-01-01 15:00
+            开票方式：电子票
+            邮箱：
+            中外运向您提交了开票申请，申请信息如下：
+            公司名称：艾洛（天津）国际物流有限公司
+            信用代码：91120102MA7GXAJX2F
+            申请金额：300.0 元
+            申请时间：2026-08-10 15:11
+            开票方式：电子票
+            邮箱：yoyo.guo@auroragroup-cn.com
+            开票备注：在线支付
+            """;
+
+        var mail = new MailEnvelope(18, "m-old-template", "sino-esign@sinotrans.com", "中外运向您提交了开票申请", DateTimeOffset.UtcNow, body);
+
+        var result = new InvoiceParser().Parse(mail, "test@example.com");
+
+        Assert.True(result.Success);
+        Assert.Equal("艾洛（天津）国际物流有限公司", result.Application!.CompanyName);
+        Assert.Equal("91120102MA7GXAJX2F", result.Application.CreditCode);
+        Assert.Equal(300m, result.Application.Amount);
+        Assert.Equal(new DateTime(2026, 8, 10, 15, 11, 0), result.Application.ApplyTime);
+        Assert.Equal("yoyo.guo@auroragroup-cn.com", result.Application.Email);
+    }
+
+    [Fact]
     public void DisplaysBusinessApplyTimeAndProcessingTimeSeparately()
     {
         var application = new InvoiceApplication
