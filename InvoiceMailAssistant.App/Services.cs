@@ -608,6 +608,15 @@ public sealed class ExcelWriter
             var existingRow = FindMatchingRow(worksheet, application, Math.Max(lastUsed, plannedRow));
             if (existingRow is not null) return existingRow.Value;
         }
+        else
+        {
+            // A new or rebuilt SQLite database may not know about rows that
+            // already exist in the customer's workbook. Reuse an unambiguous
+            // matching row before appending, otherwise a historical scan can
+            // duplicate an entire existing block.
+            var existingRow = FindMatchingRow(worksheet, application, lastUsed);
+            if (existingRow is not null) return existingRow.Value;
+        }
 
         return Math.Max(lastUsed + 1, 2);
     }
@@ -762,7 +771,8 @@ public sealed class ExcelWriter
         for (var row = 2; row <= lastRow; row++)
         {
             if (!RowMatches(worksheet, row, application)) continue;
-            if (match is not null) return null;
+            if (match is not null)
+                throw new ExcelRowOccupiedException($"Excel 中存在多个与申请匹配的历史行（第 {match} 行和第 {row} 行），已停止自动追加以避免重复数据。");
             match = row;
         }
         return match;
@@ -773,23 +783,36 @@ public sealed class ExcelWriter
         if (!string.Equals(worksheet.Cell(row, 2).GetString().Trim(), application.CompanyName.Trim(), StringComparison.Ordinal)) return false;
         if (!string.Equals(worksheet.Cell(row, 3).GetString().Trim(), application.CreditCode.Trim(), StringComparison.Ordinal)) return false;
         if (!decimal.TryParse(worksheet.Cell(row, 4).GetString(), out var amount) || amount != application.Amount) return false;
-        return string.Equals(worksheet.Cell(row, 6).GetString().Trim(), application.Email.Trim(), StringComparison.OrdinalIgnoreCase);
+        if (!string.Equals(worksheet.Cell(row, 6).GetString().Trim(), application.Email.Trim(), StringComparison.OrdinalIgnoreCase)) return false;
+        return ApplicationDateMatches(worksheet, row, application.ApplyTime.Date);
+    }
+
+    private static bool ApplicationDateMatches(IXLWorksheet worksheet, int row, DateTime expectedDate)
+    {
+        var rowDate = ParseSheetDate(worksheet.Cell(row, 1).GetString(), expectedDate.Year)
+            ?? FindPreviousApplicationDate(worksheet, row - 1, expectedDate.Year);
+        // A completely unlabelled legacy block has no date context to compare.
+        // Its business fields can still safely identify an existing row.
+        return rowDate is null || rowDate.Value.Date == expectedDate;
     }
 
     private static DateTime? FindPreviousApplicationDate(IXLWorksheet ws, int row, int assumedYear)
     {
         for (var current = row; current >= 2; current--)
         {
-            var text = ws.Cell(current, 1).GetString().Trim();
-            if (string.IsNullOrWhiteSpace(text)) continue;
-            var parts = text.Split('.');
-            if (parts.Length == 2 && int.TryParse(parts[0], out var month) && int.TryParse(parts[1], out var day))
-            {
-                try { return new DateTime(assumedYear, month, day); }
-                catch (ArgumentOutOfRangeException) { return null; }
-            }
+            var date = ParseSheetDate(ws.Cell(current, 1).GetString(), assumedYear);
+            if (date is not null) return date;
         }
         return null;
+    }
+
+    private static DateTime? ParseSheetDate(string? text, int assumedYear)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var parts = text.Trim().Split(['.', '/'], StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length != 2 || !int.TryParse(parts[0], out var month) || !int.TryParse(parts[1], out var day)) return null;
+        try { return new DateTime(assumedYear, month, day); }
+        catch (ArgumentOutOfRangeException) { return null; }
     }
 
     private static void PatchWorksheetXml(string filePath, string worksheetName, InvoiceApplication application, int targetRow, DateTime? previousDate)
