@@ -57,45 +57,62 @@ public sealed class MailboxService : IDisposable
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            await EnsureConnectedAsync(account, password, host, port, cancellationToken);
-            var messages = await _session!.FetchCandidateMessagesAsync(monitorFromUtc, cancellationToken);
-            var result = new List<MailEnvelope>(messages.Count);
-            foreach (var message in messages)
+            var connectionKey = BuildConnectionKey(account, host, port);
+            for (var attempt = 0; ; attempt++)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (message.InternalDate < monitorFromUtc && string.IsNullOrWhiteSpace(message.FetchError))
-                    continue;
-                var fromAddresses = message.FromAddresses
-                    .Select(x => x.Trim().ToLowerInvariant())
-                    .Where(x => !string.IsNullOrWhiteSpace(x))
-                    .ToArray();
-                var from = fromAddresses.Length == 1 ? fromAddresses[0] : string.Empty;
-                var subject = message.Subject.Trim();
-                var matches = string.Equals(from, Sender, StringComparison.OrdinalIgnoreCase)
-                    && subject.StartsWith(SubjectPrefix, StringComparison.Ordinal);
-                if (!matches && string.IsNullOrWhiteSpace(message.FetchError)) continue;
+                try
+                {
+                    await EnsureConnectedAsync(account, password, host, port, cancellationToken);
+                    var messages = await _session!.FetchCandidateMessagesAsync(monitorFromUtc, cancellationToken);
+                    var result = new List<MailEnvelope>(messages.Count);
+                    foreach (var message in messages)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (message.InternalDate < monitorFromUtc && string.IsNullOrWhiteSpace(message.FetchError))
+                            continue;
+                        var fromAddresses = message.FromAddresses
+                            .Select(x => x.Trim().ToLowerInvariant())
+                            .Where(x => !string.IsNullOrWhiteSpace(x))
+                            .ToArray();
+                        var from = fromAddresses.Length == 1 ? fromAddresses[0] : string.Empty;
+                        var subject = message.Subject.Trim();
+                        var matches = string.Equals(from, Sender, StringComparison.OrdinalIgnoreCase)
+                            && subject.StartsWith(SubjectPrefix, StringComparison.Ordinal);
+                        if (!matches && string.IsNullOrWhiteSpace(message.FetchError)) continue;
 
-                result.Add(new MailEnvelope(
-                    message.Uid,
-                    message.MessageId,
-                    from,
-                    subject,
-                    message.InternalDate,
-                    message.BodyText,
-                    message.UidValidity,
-                    message.MailboxName,
-                    message.FetchError));
+                        result.Add(new MailEnvelope(
+                            message.Uid,
+                            message.MessageId,
+                            from,
+                            subject,
+                            message.InternalDate,
+                            message.BodyText,
+                            message.UidValidity,
+                            message.MailboxName,
+                            message.FetchError));
+                    }
+
+                    _failureCount = 0;
+                    _retryAfterUtc = DateTimeOffset.MinValue;
+                    return result;
+                }
+                catch (Exception ex) when (IsTransient(ex) && attempt == 0 && HasSessionForKey(connectionKey))
+                {
+                    // A long-lived IMAP socket can look connected locally after
+                    // the server or a network device has already closed it. Do
+                    // one controlled reconnect in the same poll so the user does
+                    // not have to press "重新连接" manually. A single retry is
+                    // intentional: persistent failures still enter backoff.
+                    await DisconnectCoreAsync();
+                    await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+                }
+                catch (Exception ex) when (IsTransient(ex))
+                {
+                    await DisconnectCoreAsync();
+                    RegisterFailure();
+                    throw;
+                }
             }
-
-            _failureCount = 0;
-            _retryAfterUtc = DateTimeOffset.MinValue;
-            return result;
-        }
-        catch (Exception ex) when (IsTransient(ex))
-        {
-            await DisconnectCoreAsync();
-            RegisterFailure();
-            throw;
         }
         finally
         {
@@ -105,7 +122,7 @@ public sealed class MailboxService : IDisposable
 
     private async Task EnsureConnectedAsync(string account, string password, string host, int port, CancellationToken cancellationToken)
     {
-        var key = $"{account.Trim().ToLowerInvariant()}|{host.Trim().ToLowerInvariant()}|{port}";
+        var key = BuildConnectionKey(account, host, port);
         if (_session?.IsConnected == true && string.Equals(_connectionKey, key, StringComparison.Ordinal))
             return;
 
@@ -120,10 +137,16 @@ public sealed class MailboxService : IDisposable
     {
         var session = await _sessionFactory.ConnectAsync(account, password, host, port, cancellationToken);
         _session = session;
-        _connectionKey = $"{account.Trim().ToLowerInvariant()}|{host.Trim().ToLowerInvariant()}|{port}";
+        _connectionKey = BuildConnectionKey(account, host, port);
         _failureCount = 0;
         _retryAfterUtc = DateTimeOffset.MinValue;
     }
+
+    private bool HasSessionForKey(string connectionKey)
+        => _session is not null && string.Equals(_connectionKey, connectionKey, StringComparison.Ordinal);
+
+    private static string BuildConnectionKey(string account, string host, int port)
+        => $"{account.Trim().ToLowerInvariant()}|{host.Trim().ToLowerInvariant()}|{port}";
 
     private async Task DisconnectCoreAsync()
     {

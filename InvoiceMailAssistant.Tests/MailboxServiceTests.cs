@@ -46,6 +46,46 @@ public sealed class MailboxServiceTests
     }
 
     [Fact]
+    public async Task ReconnectsAndRetriesWhenTheExistingImapSessionDrops()
+    {
+        var monitorFrom = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var messages = new[] { CreateMessage(1, monitorFrom.AddMinutes(1)) };
+        var first = new FakeMailboxSession(messages, new IOException("IMAP server unexpectedly disconnected"));
+        var second = new FakeMailboxSession(messages);
+        var sessions = new Queue<IMailboxSession>([first, second]);
+        var factory = new FakeMailboxSessionFactory(() => sessions.Dequeue());
+        using var service = new MailboxService(factory);
+
+        var result = await service.FetchCandidateMessagesAsync("account@example.com", "password", "imap.example.com", 993, monitorFrom, 200, CancellationToken.None);
+
+        Assert.Single(result);
+        Assert.Equal(2, factory.ConnectCount);
+        Assert.False(first.IsConnected);
+
+        await service.FetchCandidateMessagesAsync("account@example.com", "password", "imap.example.com", 993, monitorFrom, 200, CancellationToken.None);
+        Assert.Equal(2, factory.ConnectCount);
+    }
+
+    [Fact]
+    public async Task LimitsReconnectToOneAttemptAndBacksOffWhenTheSessionKeepsFailing()
+    {
+        var monitorFrom = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var failure = new IOException("IMAP server unexpectedly disconnected");
+        var sessions = new Queue<IMailboxSession>([
+            new FakeMailboxSession([], failure),
+            new FakeMailboxSession([], failure)
+        ]);
+        var factory = new FakeMailboxSessionFactory(() => sessions.Dequeue());
+        using var service = new MailboxService(factory);
+
+        await Assert.ThrowsAsync<IOException>(() => service.FetchCandidateMessagesAsync("account@example.com", "password", "imap.example.com", 993, monitorFrom, 200, CancellationToken.None));
+        Assert.Equal(2, factory.ConnectCount);
+
+        await Assert.ThrowsAsync<MailboxBackoffException>(() => service.FetchCandidateMessagesAsync("account@example.com", "password", "imap.example.com", 993, monitorFrom, 200, CancellationToken.None));
+        Assert.Equal(2, factory.ConnectCount);
+    }
+
+    [Fact]
     public async Task FailedConnectionEntersBackoffInsteadOfReloggingEveryPoll()
     {
         var factory = new FakeMailboxSessionFactory(() => throw new IOException("network down"));
@@ -91,13 +131,14 @@ public sealed class MailboxServiceTests
         }
     }
 
-    private sealed class FakeMailboxSession(IReadOnlyList<MailboxMessage> messages) : IMailboxSession
+    private sealed class FakeMailboxSession(IReadOnlyList<MailboxMessage> messages, Exception? fetchException = null) : IMailboxSession
     {
         public bool IsConnected { get; private set; } = true;
 
         public Task<IReadOnlyList<MailboxMessage>> FetchCandidateMessagesAsync(DateTimeOffset monitorFromUtc, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (fetchException is not null) throw fetchException;
             return Task.FromResult(messages);
         }
 
