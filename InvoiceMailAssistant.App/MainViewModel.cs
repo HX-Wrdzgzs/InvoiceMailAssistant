@@ -208,7 +208,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             _lastChecked = DateTime.Now;
             ConnectionText = $"已连接：{EmailAccount.Trim()}";
             if (added > 0) NewApplicationsFound?.Invoke(added);
-            if (!automatic || added > 0 || repaired > 0 || repairedExisting > 0)
+            if (!automatic || added > 0 || repaired > 0 || repairedExisting > 0
+                || StatusText.StartsWith("检查失败", StringComparison.Ordinal)
+                || StatusText.StartsWith("自动监听异常", StringComparison.Ordinal))
                 StatusText = $"检查完成，本次发现 {added} 条新申请，修复 {repairedExisting} 条历史记录，重新处理 {repaired} 条失败记录";
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
