@@ -197,6 +197,108 @@ public sealed class ExcelWriterTests
     }
 
     [Fact]
+    public async Task ReusesExistingRowWhenDatabaseHasNoExcelRow()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"invoice-mail-{Guid.NewGuid():N}.xlsx");
+        try
+        {
+            using (var workbook = new XLWorkbook())
+            {
+                var sheet = workbook.AddWorksheet("中外运");
+                sheet.Cell(1, 1).Value = "日期";
+                sheet.Cell(2, 1).Value = "8.8";
+                sheet.Cell(2, 2).Value = "测试企业";
+                sheet.Cell(2, 3).Value = "CODE-1";
+                sheet.Cell(2, 4).Value = 100m;
+                sheet.Cell(2, 6).Value = "finance@example.com";
+                workbook.SaveAs(path);
+            }
+
+            var app = CreateApplication(0);
+            app.ExcelRow = null;
+            var writer = new ExcelWriter();
+
+            var plannedRow = writer.ResolveTargetRow(app, path, "中外运");
+            app.ExcelRow = plannedRow;
+            Assert.Equal(2, plannedRow);
+            Assert.Equal(2, await writer.WriteAsync(app, path, "中外运"));
+
+            using var verify = new XLWorkbook(path);
+            Assert.True(verify.Worksheet("中外运").Cell(3, 2).IsEmpty());
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task DoesNotReuseSameBusinessFieldsOnDifferentApplicationDate()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"invoice-mail-{Guid.NewGuid():N}.xlsx");
+        try
+        {
+            using (var workbook = new XLWorkbook())
+            {
+                var sheet = workbook.AddWorksheet("中外运");
+                sheet.Cell(1, 1).Value = "日期";
+                sheet.Cell(2, 1).Value = "8.8";
+                sheet.Cell(2, 2).Value = "测试企业";
+                sheet.Cell(2, 3).Value = "CODE-1";
+                sheet.Cell(2, 4).Value = 100m;
+                sheet.Cell(2, 6).Value = "finance@example.com";
+                workbook.SaveAs(path);
+            }
+
+            var app = CreateApplication(0);
+            app.ApplyTime = new DateTime(2026, 8, 9, 9, 0, 0);
+            app.ExcelRow = null;
+            var writer = new ExcelWriter();
+
+            var plannedRow = writer.ResolveTargetRow(app, path, "中外运");
+            app.ExcelRow = plannedRow;
+            Assert.Equal(3, plannedRow);
+            Assert.Equal(3, await writer.WriteAsync(app, path, "中外运"));
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void StopsInsteadOfAppendingWhenMultipleExistingRowsMatch()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"invoice-mail-{Guid.NewGuid():N}.xlsx");
+        try
+        {
+            using (var workbook = new XLWorkbook())
+            {
+                var sheet = workbook.AddWorksheet("中外运");
+                sheet.Cell(1, 1).Value = "日期";
+                foreach (var row in new[] { 2, 3 })
+                {
+                    sheet.Cell(row, 1).Value = "8.8";
+                    sheet.Cell(row, 2).Value = "测试企业";
+                    sheet.Cell(row, 3).Value = "CODE-1";
+                    sheet.Cell(row, 4).Value = 100m;
+                    sheet.Cell(row, 6).Value = "finance@example.com";
+                }
+                workbook.SaveAs(path);
+            }
+
+            var app = CreateApplication(0);
+            app.ExcelRow = null;
+            var error = Assert.Throws<ExcelRowOccupiedException>(() => new ExcelWriter().ResolveTargetRow(app, path, "中外运"));
+            Assert.Contains("多个", error.Message);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task KeepsManualColumnsUntouched()
     {
         var path = Path.Combine(Path.GetTempPath(), $"invoice-mail-{Guid.NewGuid():N}.xlsx");

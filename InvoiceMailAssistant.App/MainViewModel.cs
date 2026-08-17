@@ -392,6 +392,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 // after planning, recompute a safe row before retrying.
                 await PlanAndWriteExcelAsync(app);
             }
+            catch (ExcelRowOccupiedException ex)
+            {
+                await _repository.UpdateStatusAsync(app.Id, ProcessingStatus.PendingExcel, ex.Message, cancellationToken: _lifetime.Token);
+            }
             catch (IOException ex)
             {
                 await _repository.UpdateStatusAsync(app.Id, ProcessingStatus.PendingExcel, ex.Message, cancellationToken: _lifetime.Token);
