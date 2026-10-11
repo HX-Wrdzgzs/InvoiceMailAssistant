@@ -183,7 +183,8 @@ public sealed class ExcelWriterTests
 
             var app = CreateApplication(2);
             var writer = new ExcelWriter();
-            Assert.Equal(3, writer.ResolveTargetRow(app, path, "中外运"));
+            app.ExcelRow = writer.ResolveTargetRow(app, path, "中外运");
+            Assert.Equal(3, app.ExcelRow);
             Assert.Equal(3, await writer.WriteAsync(app, path, "中外运"));
 
             using var verify = new XLWorkbook(path);
@@ -267,7 +268,7 @@ public sealed class ExcelWriterTests
     }
 
     [Fact]
-    public void StopsInsteadOfAppendingWhenMultipleExistingRowsMatch()
+    public void AssignsTheLowestUnclaimedMatchingRow()
     {
         var path = Path.Combine(Path.GetTempPath(), $"invoice-mail-{Guid.NewGuid():N}.xlsx");
         try
@@ -289,8 +290,9 @@ public sealed class ExcelWriterTests
 
             var app = CreateApplication(0);
             app.ExcelRow = null;
-            var error = Assert.Throws<ExcelRowOccupiedException>(() => new ExcelWriter().ResolveTargetRow(app, path, "中外运"));
-            Assert.Contains("多个", error.Message);
+            var writer = new ExcelWriter();
+            Assert.Equal(2, writer.ResolveTargetRow(app, path, "中外运"));
+            Assert.Equal(3, writer.ResolveTargetRow(app, path, "中外运", new HashSet<int> { 2 }));
         }
         finally
         {

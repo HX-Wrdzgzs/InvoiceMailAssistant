@@ -11,6 +11,7 @@ public sealed class AppSettings
     public int ImapPort { get; set; } = 993;
     public string ExcelPath { get; set; } = string.Empty;
     public string WorksheetName { get; set; } = "中外运";
+    public string YuntianhuaWorksheetName { get; set; } = "云天化";
     public int PollSeconds { get; set; } = 60;
     public bool RunAtStartup { get; set; }
     public string MailboxIdentity { get; set; } = string.Empty;

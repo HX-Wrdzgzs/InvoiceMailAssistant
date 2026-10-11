@@ -6,6 +6,54 @@ namespace InvoiceMailAssistant.Tests;
 public sealed class RepositoryTests
 {
     [Fact]
+    public async Task SourceStatisticsSeparateSinotransAndYuntianhuaAcrossStatuses()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"invoice-mail-{Guid.NewGuid():N}.db");
+        try
+        {
+            var repository = new SqliteInvoiceRepository(path);
+            await repository.InitializeAsync();
+            var now = DateTimeOffset.Now;
+
+            var sinotrans = CreateApplication("stats-sino", 70, 1);
+            sinotrans.Source = InvoiceSource.Sinotrans;
+            sinotrans.MailReceivedAt = now.AddMinutes(-5);
+            sinotrans.UpdatedAt = now.AddMinutes(-5);
+            sinotrans.Id = (await repository.TryInsertAsync(sinotrans, Deduplication.CreateFallbackHash(sinotrans)))!.Value;
+            await repository.UpdateStatusAsync(sinotrans.Id, ProcessingStatus.Completed);
+
+            var yuntianhuaPending = CreateApplication("stats-yun-pending", 71, 1);
+            yuntianhuaPending.Source = InvoiceSource.Yuntianhua;
+            yuntianhuaPending.MailReceivedAt = now.AddMinutes(-4);
+            yuntianhuaPending.Id = (await repository.TryInsertAsync(yuntianhuaPending, Deduplication.CreateFallbackHash(yuntianhuaPending)))!.Value;
+            await repository.UpdateStatusAsync(yuntianhuaPending.Id, ProcessingStatus.PendingExcel);
+
+            var yuntianhuaFailed = CreateApplication("stats-yun-failed", 72, 1);
+            yuntianhuaFailed.Source = InvoiceSource.Yuntianhua;
+            yuntianhuaFailed.MailReceivedAt = now.AddMinutes(-3);
+            yuntianhuaFailed.ProcessingStatus = ProcessingStatus.ParseFailed;
+            yuntianhuaFailed.Id = (await repository.TryInsertAsync(yuntianhuaFailed, Deduplication.CreateFallbackHash(yuntianhuaFailed)))!.Value;
+
+            var stats = await repository.GetSourceStatisticsAsync(now);
+            var sinoStats = Assert.Single(stats, x => x.Source == InvoiceSource.Sinotrans);
+            var yunStats = Assert.Single(stats, x => x.Source == InvoiceSource.Yuntianhua);
+
+            Assert.Equal(1, sinoStats.TodayReceived);
+            Assert.Equal(1, sinoStats.TodayCompleted);
+            Assert.Equal(0, sinoStats.Pending);
+            Assert.Equal(0, sinoStats.Failed);
+            Assert.Equal(2, yunStats.TodayReceived);
+            Assert.Equal(0, yunStats.TodayCompleted);
+            Assert.Equal(1, yunStats.Pending);
+            Assert.Equal(1, yunStats.Failed);
+        }
+        finally
+        {
+            DeleteDatabase(path);
+        }
+    }
+
+    [Fact]
     public async Task ConcurrentUniqueInsertReturnsOneWinnerAndOneDuplicate()
     {
         var path = Path.Combine(Path.GetTempPath(), $"invoice-mail-{Guid.NewGuid():N}.db");

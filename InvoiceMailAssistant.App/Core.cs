@@ -17,6 +17,106 @@ public enum ProcessingStatus
     MailFailed
 }
 
+public enum InvoiceSource
+{
+    Unknown = 0,
+    Sinotrans = 1,
+    Yuntianhua = 2
+}
+
+public sealed record InvoiceSourceDefinition(
+    InvoiceSource Source,
+    string DisplayName,
+    string SenderAddress,
+    string SubjectPrefix,
+    string BodyMarker)
+{
+    public bool Matches(MailEnvelope mail)
+    {
+        if (!string.Equals(mail.FromAddress.Trim(), SenderAddress, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        // A MIME fetch failure still needs to be persisted for review. The
+        // sender is the only reliable source signal available in that case.
+        if (!string.IsNullOrWhiteSpace(mail.FetchError)) return true;
+
+        var subjectMatches = !string.IsNullOrWhiteSpace(SubjectPrefix)
+            && mail.Subject.Trim().StartsWith(SubjectPrefix, StringComparison.Ordinal);
+        if (subjectMatches) return true;
+
+        var normalizedBody = InvoiceParser.NormalizeBody(mail.BodyText);
+        return !string.IsNullOrWhiteSpace(BodyMarker)
+            && normalizedBody.Contains(BodyMarker, StringComparison.OrdinalIgnoreCase);
+    }
+}
+
+public sealed record InvoiceSourceStatistics(
+    InvoiceSource Source,
+    string DisplayName,
+    int TodayReceived,
+    int TodayCompleted,
+    int Pending,
+    int Failed);
+
+public sealed record InvoiceSourceCount(InvoiceSource Source, string DisplayName, int Count);
+
+public sealed record InvoiceWorksheetLayout(
+    int DataStartRow,
+    int DateColumn,
+    int CompanyColumn,
+    int CreditCodeColumn,
+    int AmountColumn,
+    int EmailColumn,
+    int MaxColumn,
+    int? SequenceColumn);
+
+public static class InvoiceWorksheetLayouts
+{
+    public static InvoiceWorksheetLayout ForSource(InvoiceSource source)
+        => source == InvoiceSource.Yuntianhua
+            ? new(3, 2, 3, 4, 5, 7, 10, 1)
+            : new(2, 1, 2, 3, 4, 6, 8, null);
+}
+
+public static class InvoiceSourceCatalog
+{
+    public static IReadOnlyList<InvoiceSourceDefinition> All { get; } =
+    [
+        new(
+            InvoiceSource.Sinotrans,
+            "中外运",
+            "sino-esign@sinotrans.com",
+            "中外运向您提交了开票申请",
+            string.Empty),
+        new(
+            InvoiceSource.Yuntianhua,
+            "云天化",
+            "cs@qsign.cn",
+            string.Empty,
+            "云天化电子签服务平台向您提交了开票申请")
+    ];
+
+    public static string GetDisplayName(InvoiceSource source)
+        => All.FirstOrDefault(x => x.Source == source)?.DisplayName
+            ?? (source == InvoiceSource.Unknown ? "未知来源" : source.ToString());
+
+    public static bool TryClassify(MailEnvelope mail, out InvoiceSource source)
+    {
+        var definition = All.FirstOrDefault(x => x.Matches(mail));
+        source = definition?.Source ?? InvoiceSource.Unknown;
+        return definition is not null;
+    }
+
+    public static IReadOnlyList<InvoiceSourceStatistics> CreateEmptyStatistics()
+        => All.Select(x => new InvoiceSourceStatistics(x.Source, x.DisplayName, 0, 0, 0, 0)).ToArray();
+
+    public static IReadOnlyList<InvoiceSourceCount> CreateCounts(IReadOnlyDictionary<InvoiceSource, int> counts)
+        => All
+            .Select(x => new InvoiceSourceCount(x.Source, x.DisplayName, counts.TryGetValue(x.Source, out var count) ? count : 0))
+            .Where(x => x.Count > 0)
+            .ToArray();
+}
+
 public sealed class InvoiceApplication
 {
     public long Id { get; set; }
@@ -35,12 +135,14 @@ public sealed class InvoiceApplication
     public uint UidValidity { get; set; }
     public string MailboxName { get; set; } = "INBOX";
     public string MailboxIdentity { get; set; } = string.Empty;
+    public InvoiceSource Source { get; set; } = InvoiceSource.Sinotrans;
     public DateTimeOffset MailReceivedAt { get; set; }
     public string MailSubject { get; set; } = string.Empty;
     public string MailFrom { get; set; } = string.Empty;
     public string NormalizedBody { get; set; } = string.Empty;
     public ProcessingStatus ProcessingStatus { get; set; } = ProcessingStatus.Discovered;
     public int? ExcelRow { get; set; }
+    public string ExcelTargetKey { get; set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.Now;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
     public string ErrorMessage { get; set; } = string.Empty;
@@ -57,6 +159,7 @@ public sealed class InvoiceApplication
     public string DisplayAmount => ProcessingStatus is ProcessingStatus.ParseFailed or ProcessingStatus.MailFailed
         ? "—"
         : Amount.ToString("F2", CultureInfo.InvariantCulture);
+    public string DisplaySourceName => InvoiceSourceCatalog.GetDisplayName(Source);
 }
 
 public sealed record MailEnvelope(
@@ -68,7 +171,8 @@ public sealed record MailEnvelope(
     string BodyText,
     uint UidValidity = 0,
     string MailboxName = "INBOX",
-    string? FetchError = null);
+    string? FetchError = null,
+    InvoiceSource Source = InvoiceSource.Unknown);
 
 public sealed record MailboxMessage(
     uint Uid,
@@ -137,6 +241,11 @@ public sealed partial class InvoiceParser
             UidValidity = mail.UidValidity,
             MailboxName = mail.MailboxName,
             MailboxIdentity = mailboxIdentity,
+            Source = mail.Source != InvoiceSource.Unknown
+                ? mail.Source
+                : InvoiceSourceCatalog.TryClassify(mail, out var classifiedSource)
+                    ? classifiedSource
+                    : InvoiceSource.Unknown,
             MailReceivedAt = mail.ReceivedAt,
             MailSubject = mail.Subject,
             MailFrom = mail.FromAddress,
@@ -230,6 +339,20 @@ public sealed partial class InvoiceParser
 
     [GeneratedRegex("[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}", RegexOptions.IgnoreCase)]
     private static partial Regex EmailRegex();
+}
+
+public static class SourceNotificationFormatter
+{
+    public static string Format(IReadOnlyList<InvoiceSourceCount> counts)
+    {
+        var details = counts
+            .Where(x => x.Count > 0)
+            .Select(x => $"来自{x.DisplayName} {x.Count} 条")
+            .ToArray();
+        return details.Length == 0
+            ? "未发现新的开票申请。"
+            : $"发现新开票申请：{string.Join("；", details)}。已写入或进入等待队列。";
+    }
 }
 
 public static class Deduplication

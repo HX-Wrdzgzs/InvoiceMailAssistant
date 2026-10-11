@@ -60,6 +60,39 @@ public sealed class RealWorkbookCompatibilityTests
         Assert.True(sheet.Cell(writtenRow, 3).Style.Font.Bold);
     }
 
+    [RealWorkbookFact]
+    public async Task RealWorkbookYuntianhuaSheetUsesItsOwnColumnLayout()
+    {
+        var path = Environment.GetEnvironmentVariable("INVOICE_REAL_XLSX_COPY");
+        Assert.False(string.IsNullOrWhiteSpace(path));
+        Assert.True(File.Exists(path), $"Real workbook copy not found: {path}");
+
+        var application = new InvoiceApplication
+        {
+            Source = InvoiceSource.Yuntianhua,
+            CompanyName = "云天化合成测试企业",
+            CreditCode = "TEST-YT-SOURCE-202610",
+            Amount = 9.52m,
+            ApplyTime = new DateTime(2026, 10, 9, 15, 52, 0),
+            Email = "yuntianhua-regression@example.com"
+        };
+        var writer = new ExcelWriter();
+        application.ExcelRow = writer.ResolveTargetRow(application, path!, "云天化", source: InvoiceSource.Yuntianhua);
+        var writtenRow = await writer.WriteAsync(application, path!, "云天化", source: InvoiceSource.Yuntianhua);
+
+        using var verify = new XLWorkbook(path!);
+        var sheet = verify.Worksheet("云天化");
+        Assert.True(writtenRow >= 3);
+        Assert.Equal(application.CompanyName, sheet.Cell(writtenRow, 3).GetString());
+        Assert.Equal(application.CreditCode, sheet.Cell(writtenRow, 4).GetString());
+        Assert.Equal(application.Amount, sheet.Cell(writtenRow, 5).GetValue<decimal>());
+        Assert.Equal(application.Email, sheet.Cell(writtenRow, 7).GetString());
+        Assert.True(
+            string.IsNullOrWhiteSpace(sheet.Cell(writtenRow, 2).GetString())
+                || sheet.Cell(writtenRow, 2).GetString() == $"{application.ApplyTime.Month}.{application.ApplyTime.Day}");
+        Assert.True(sheet.Cell(writtenRow, 1).GetValue<int>() > 0);
+    }
+
     private sealed record WorkbookSnapshot(
         IReadOnlyList<string> EntryNames,
         IReadOnlyList<string> SheetNames,

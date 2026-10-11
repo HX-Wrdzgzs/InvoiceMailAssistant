@@ -44,5 +44,15 @@
             <Setter Property="Margin" Value="0,4,0,10"/>
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
         </Style>
+        <Style TargetType="DataGrid">
+            <Setter Property="CanUserResizeColumns" Value="True"/>
+            <Setter Property="EnableRowVirtualization" Value="True"/>
+            <Setter Property="EnableColumnVirtualization" Value="True"/>
+            <Setter Property="ScrollViewer.CanContentScroll" Value="True"/>
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto"/>
+            <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto"/>
+            <Setter Property="VirtualizingPanel.IsVirtualizing" Value="True"/>
+            <Setter Property="VirtualizingPanel.VirtualizationMode" Value="Recycling"/>
+        </Style>
     </Application.Resources>
 </Application>

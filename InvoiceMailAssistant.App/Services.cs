@@ -16,33 +16,35 @@ using Microsoft.Win32;
 
 namespace InvoiceMailAssistant.App;
 
-public sealed class MailboxService : IDisposable
+public sealed class MailboxService : IDisposable, IAsyncDisposable
 {
-    private const string Sender = "sino-esign@sinotrans.com";
-    private const string SubjectPrefix = "中外运向您提交了开票申请";
     private readonly IMailboxSessionFactory _sessionFactory;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly object _disposeSync = new();
     private IMailboxSession? _session;
     private string? _connectionKey;
+    private string? _backoffKey;
     private DateTimeOffset _retryAfterUtc;
     private int _failureCount;
+    private Task? _disposeTask;
 
     public MailboxService(IMailboxSessionFactory? sessionFactory = null)
         => _sessionFactory = sessionFactory ?? new MailKitMailboxSessionFactory();
 
     public async Task TestConnectionAsync(string account, string password, string host, int port, CancellationToken cancellationToken)
     {
-        await _gate.WaitAsync(cancellationToken);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             _retryAfterUtc = DateTimeOffset.MinValue;
-            await DisconnectCoreAsync();
-            await ConnectCoreAsync(account, password, host, port, cancellationToken);
+            _backoffKey = null;
+            await DisconnectCoreAsync().ConfigureAwait(false);
+            await ConnectCoreAsync(account, password, host, port, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (IsTransient(ex))
         {
-            await DisconnectCoreAsync();
-            RegisterFailure();
+            await DisconnectCoreAsync().ConfigureAwait(false);
+            RegisterFailure(BuildConnectionKey(account, host, port, password));
             throw;
         }
         finally
@@ -54,16 +56,16 @@ public sealed class MailboxService : IDisposable
     public async Task<IReadOnlyList<MailEnvelope>> FetchCandidateMessagesAsync(string account, string password, string host, int port, DateTimeOffset monitorFromUtc, int maxMessages, CancellationToken cancellationToken)
     {
         _ = maxMessages; // Kept for source compatibility; the search is intentionally not capped.
-        await _gate.WaitAsync(cancellationToken);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var connectionKey = BuildConnectionKey(account, host, port);
+            var connectionKey = BuildConnectionKey(account, host, port, password);
             for (var attempt = 0; ; attempt++)
             {
                 try
                 {
-                    await EnsureConnectedAsync(account, password, host, port, cancellationToken);
-                    var messages = await _session!.FetchCandidateMessagesAsync(monitorFromUtc, cancellationToken);
+                    await EnsureConnectedAsync(account, password, host, port, cancellationToken).ConfigureAwait(false);
+                    var messages = await _session!.FetchCandidateMessagesAsync(monitorFromUtc, cancellationToken).ConfigureAwait(false);
                     var result = new List<MailEnvelope>(messages.Count);
                     foreach (var message in messages)
                     {
@@ -75,21 +77,19 @@ public sealed class MailboxService : IDisposable
                             .Where(x => !string.IsNullOrWhiteSpace(x))
                             .ToArray();
                         var from = fromAddresses.Length == 1 ? fromAddresses[0] : string.Empty;
-                        var subject = message.Subject.Trim();
-                        var matches = string.Equals(from, Sender, StringComparison.OrdinalIgnoreCase)
-                            && subject.StartsWith(SubjectPrefix, StringComparison.Ordinal);
-                        if (!matches && string.IsNullOrWhiteSpace(message.FetchError)) continue;
-
-                        result.Add(new MailEnvelope(
+                        var envelope = new MailEnvelope(
                             message.Uid,
                             message.MessageId,
                             from,
-                            subject,
+                            message.Subject.Trim(),
                             message.InternalDate,
                             message.BodyText,
                             message.UidValidity,
                             message.MailboxName,
-                            message.FetchError));
+                            message.FetchError);
+                        if (!InvoiceSourceCatalog.TryClassify(envelope, out var source)) continue;
+
+                        result.Add(envelope with { Source = source });
                     }
 
                     _failureCount = 0;
@@ -103,13 +103,13 @@ public sealed class MailboxService : IDisposable
                     // one controlled reconnect in the same poll so the user does
                     // not have to press "重新连接" manually. A single retry is
                     // intentional: persistent failures still enter backoff.
-                    await DisconnectCoreAsync();
-                    await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+                    await DisconnectCoreAsync().ConfigureAwait(false);
+                    await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception ex) when (IsTransient(ex))
                 {
-                    await DisconnectCoreAsync();
-                    RegisterFailure();
+                    await DisconnectCoreAsync().ConfigureAwait(false);
+                    RegisterFailure(connectionKey);
                     throw;
                 }
             }
@@ -122,61 +122,85 @@ public sealed class MailboxService : IDisposable
 
     private async Task EnsureConnectedAsync(string account, string password, string host, int port, CancellationToken cancellationToken)
     {
-        var key = BuildConnectionKey(account, host, port);
+        var key = BuildConnectionKey(account, host, port, password);
         if (_session?.IsConnected == true && string.Equals(_connectionKey, key, StringComparison.Ordinal))
             return;
 
-        if (_retryAfterUtc > DateTimeOffset.UtcNow)
+        if (_retryAfterUtc > DateTimeOffset.UtcNow && string.Equals(_backoffKey, key, StringComparison.Ordinal))
             throw new MailboxBackoffException($"邮箱连接失败，正在退避重试（下次重试时间：{_retryAfterUtc.ToLocalTime():HH:mm:ss}）。");
 
-        await DisconnectCoreAsync();
-        await ConnectCoreAsync(account, password, host, port, cancellationToken);
+        if (!string.Equals(_backoffKey, key, StringComparison.Ordinal))
+        {
+            _failureCount = 0;
+            _retryAfterUtc = DateTimeOffset.MinValue;
+            _backoffKey = null;
+        }
+
+        await DisconnectCoreAsync().ConfigureAwait(false);
+        await ConnectCoreAsync(account, password, host, port, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task ConnectCoreAsync(string account, string password, string host, int port, CancellationToken cancellationToken)
     {
-        var session = await _sessionFactory.ConnectAsync(account, password, host, port, cancellationToken);
+        var session = await _sessionFactory.ConnectAsync(account, password, host, port, cancellationToken).ConfigureAwait(false);
         _session = session;
-        _connectionKey = BuildConnectionKey(account, host, port);
+        _connectionKey = BuildConnectionKey(account, host, port, password);
         _failureCount = 0;
         _retryAfterUtc = DateTimeOffset.MinValue;
+        _backoffKey = null;
     }
 
     private bool HasSessionForKey(string connectionKey)
         => _session is not null && string.Equals(_connectionKey, connectionKey, StringComparison.Ordinal);
 
-    private static string BuildConnectionKey(string account, string host, int port)
-        => $"{account.Trim().ToLowerInvariant()}|{host.Trim().ToLowerInvariant()}|{port}";
+    private static string BuildConnectionKey(string account, string host, int port, string password)
+    {
+        var passwordFingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(password)));
+        return $"{account.Trim().ToLowerInvariant()}|{host.Trim().ToLowerInvariant()}|{port}|{passwordFingerprint}";
+    }
 
     private async Task DisconnectCoreAsync()
     {
         var session = _session;
         _session = null;
         _connectionKey = null;
-        if (session is not null) await session.DisposeAsync();
+        if (session is not null) await session.DisposeAsync().ConfigureAwait(false);
     }
 
-    private void RegisterFailure()
+    private void RegisterFailure(string connectionKey)
     {
         var seconds = Math.Min(600, 30 * Math.Pow(2, Math.Min(_failureCount, 5)));
         _failureCount++;
         _retryAfterUtc = DateTimeOffset.UtcNow.AddSeconds(seconds);
+        _backoffKey = connectionKey;
     }
 
     private static bool IsTransient(Exception exception)
         => exception is IOException or SocketException or MailKit.Security.AuthenticationException or SslHandshakeException or MailKit.ServiceNotConnectedException or MailKit.ProtocolException;
 
-    public void Dispose()
+    public ValueTask DisposeAsync()
     {
+        lock (_disposeSync)
+        {
+            return new ValueTask(_disposeTask ??= DisposeCoreAsync());
+        }
+    }
+
+    private async Task DisposeCoreAsync()
+    {
+        await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            _gate.Wait();
-            try { DisconnectCoreAsync().GetAwaiter().GetResult(); }
-            catch { }
-            finally { _gate.Release(); }
+            await DisconnectCoreAsync().ConfigureAwait(false);
         }
-        finally { _gate.Dispose(); }
+        finally
+        {
+            _gate.Release();
+            _gate.Dispose();
+        }
     }
+
+    public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
 }
 
 public sealed class MailKitMailboxSessionFactory : IMailboxSessionFactory
@@ -200,9 +224,6 @@ public sealed class MailKitMailboxSessionFactory : IMailboxSessionFactory
 
 public sealed class MailKitMailboxSession(ImapClient client) : IMailboxSession
 {
-    private const string Sender = "sino-esign@sinotrans.com";
-    private const string SubjectPrefix = "中外运向您提交了开票申请";
-
     public bool IsConnected => client.IsConnected && client.IsAuthenticated;
 
     public async Task<IReadOnlyList<MailboxMessage>> FetchCandidateMessagesAsync(DateTimeOffset monitorFromUtc, CancellationToken cancellationToken)
@@ -211,10 +232,17 @@ public sealed class MailKitMailboxSession(ImapClient client) : IMailboxSession
         if (!inbox.IsOpen) await inbox.OpenAsync(FolderAccess.ReadOnly, cancellationToken);
 
         var imapDateFloor = monitorFromUtc.UtcDateTime.Date.AddDays(-1);
-        var query = SearchQuery.FromContains(Sender)
-            .And(SearchQuery.SubjectContains(SubjectPrefix))
-            .And(SearchQuery.DeliveredAfter(imapDateFloor));
-        var uids = await inbox.SearchAsync(query, cancellationToken);
+        var uidValues = new HashSet<uint>();
+        foreach (var source in InvoiceSourceCatalog.All)
+        {
+            var query = SearchQuery.FromContains(source.SenderAddress)
+                .And(SearchQuery.DeliveredAfter(imapDateFloor));
+            var sourceUids = await inbox.SearchAsync(query, cancellationToken);
+            foreach (var uid in sourceUids) uidValues.Add(uid.Id);
+        }
+
+        if (uidValues.Count == 0) return [];
+        var uids = uidValues.OrderBy(x => x).Select(x => new UniqueId(x)).ToArray();
         var summaries = await inbox.FetchAsync(uids, MessageSummaryItems.Envelope | MessageSummaryItems.InternalDate, cancellationToken);
         var result = new List<MailboxMessage>(summaries.Count);
         foreach (var summary in summaries.OrderBy(x => x.UniqueId.Id))
@@ -265,6 +293,8 @@ public sealed class SqliteInvoiceRepository(string databasePath)
 {
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false, DefaultTimeout = 30 }.ToString();
 
+    public string DatabasePath => databasePath;
+
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         var directory = Path.GetDirectoryName(databasePath);
@@ -292,12 +322,14 @@ public sealed class SqliteInvoiceRepository(string databasePath)
                 uid_validity INTEGER NOT NULL DEFAULT 0,
                 mailbox_name TEXT NOT NULL DEFAULT 'INBOX',
                 mailbox_identity TEXT NOT NULL,
+                source INTEGER NOT NULL DEFAULT 1,
                 mail_received_at TEXT NOT NULL,
                 mail_subject TEXT NOT NULL,
                 mail_from TEXT NOT NULL,
                 normalized_body TEXT NOT NULL,
                 processing_status INTEGER NOT NULL,
                 excel_row INTEGER NULL,
+                excel_target_key TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 error_message TEXT NOT NULL,
@@ -311,8 +343,10 @@ public sealed class SqliteInvoiceRepository(string databasePath)
         await EnsureColumnAsync(connection, "uid_validity", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
         await EnsureColumnAsync(connection, "mailbox_name", "TEXT NOT NULL DEFAULT 'INBOX'", cancellationToken);
         await EnsureColumnAsync(connection, "mailbox_identity", "TEXT NOT NULL DEFAULT ''", cancellationToken);
+        await EnsureColumnAsync(connection, "source", "INTEGER NOT NULL DEFAULT 1", cancellationToken);
+        await EnsureColumnAsync(connection, "excel_target_key", "TEXT NOT NULL DEFAULT ''", cancellationToken);
         command = connection.CreateCommand();
-        command.CommandText = "DROP INDEX IF EXISTS ux_invoice_message_id; DROP INDEX IF EXISTS ux_invoice_fallback_hash; DROP INDEX IF EXISTS ux_invoice_uid; CREATE UNIQUE INDEX IF NOT EXISTS ux_invoice_message_id ON invoice_applications(mailbox_identity, message_id) WHERE message_id <> ''; CREATE UNIQUE INDEX IF NOT EXISTS ux_invoice_fallback_hash ON invoice_applications(mailbox_identity, fallback_hash); CREATE UNIQUE INDEX IF NOT EXISTS ux_invoice_uid ON invoice_applications(mailbox_identity, mailbox_name, uid_validity, imap_uid);";
+        command.CommandText = "DROP INDEX IF EXISTS ux_invoice_message_id; DROP INDEX IF EXISTS ux_invoice_fallback_hash; DROP INDEX IF EXISTS ux_invoice_uid; DROP INDEX IF EXISTS ux_invoice_excel_row; CREATE UNIQUE INDEX IF NOT EXISTS ux_invoice_message_id ON invoice_applications(mailbox_identity, message_id) WHERE message_id <> ''; CREATE UNIQUE INDEX IF NOT EXISTS ux_invoice_fallback_hash ON invoice_applications(mailbox_identity, fallback_hash); CREATE UNIQUE INDEX IF NOT EXISTS ux_invoice_uid ON invoice_applications(mailbox_identity, mailbox_name, uid_validity, imap_uid); CREATE UNIQUE INDEX IF NOT EXISTS ux_invoice_excel_row ON invoice_applications(excel_target_key, excel_row) WHERE excel_target_key <> '' AND excel_row IS NOT NULL;";
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -362,10 +396,10 @@ public sealed class SqliteInvoiceRepository(string databasePath)
         command.CommandText = """
             INSERT INTO invoice_applications (
                 company_name, credit_code, amount, apply_time, invoice_type, recipient, phone, address, email, remark,
-                message_id, imap_uid, uid_validity, mailbox_name, mailbox_identity, mail_received_at, mail_subject, mail_from, normalized_body,
-                processing_status, excel_row, created_at, updated_at, error_message, fallback_hash)
+                message_id, imap_uid, uid_validity, mailbox_name, mailbox_identity, source, mail_received_at, mail_subject, mail_from, normalized_body,
+                processing_status, excel_row, excel_target_key, created_at, updated_at, error_message, fallback_hash)
             VALUES ($company, $credit, $amount, $apply, $type, $recipient, $phone, $address, $email, $remark,
-                $messageId, $uid, $uidValidity, $mailboxName, $mailbox, $received, $subject, $from, $body, $status, $excelRow, $created, $updated, $error, $hash);
+                $messageId, $uid, $uidValidity, $mailboxName, $mailbox, $source, $received, $subject, $from, $body, $status, $excelRow, $excelTargetKey, $created, $updated, $error, $hash);
             SELECT last_insert_rowid();
             """;
         AddParameters(command, app, fallbackHash);
@@ -387,6 +421,117 @@ public sealed class SqliteInvoiceRepository(string databasePath)
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    public async Task<bool> TryReserveExcelRowAsync(
+        long id,
+        string targetKey,
+        int excelRow,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(targetKey)) throw new ArgumentException("Excel 目标标识不能为空。", nameof(targetKey));
+        if (excelRow < 2) throw new ArgumentOutOfRangeException(nameof(excelRow));
+
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = "UPDATE invoice_applications SET excel_target_key=$targetKey, excel_row=$row, processing_status=$status, error_message='', updated_at=$updated WHERE id=$id;";
+        command.Parameters.AddWithValue("$targetKey", targetKey);
+        command.Parameters.AddWithValue("$row", excelRow);
+        command.Parameters.AddWithValue("$status", (int)ProcessingStatus.PendingExcel);
+        command.Parameters.AddWithValue("$updated", DateTimeOffset.Now.ToString("O"));
+        command.Parameters.AddWithValue("$id", id);
+        try
+        {
+            var changed = await command.ExecuteNonQueryAsync(cancellationToken);
+            if (changed != 1) throw new InvalidOperationException($"无法找到待写入的开票记录：{id}。");
+            return true;
+        }
+        catch (SqliteException ex) when (IsUniqueConstraint(ex))
+        {
+            return false;
+        }
+    }
+
+    public async Task ClearExcelAssignmentAsync(long id, string error, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = "UPDATE invoice_applications SET excel_target_key='', excel_row=NULL, processing_status=$status, error_message=$error, updated_at=$updated WHERE id=$id;";
+        command.Parameters.AddWithValue("$status", (int)ProcessingStatus.PendingExcel);
+        command.Parameters.AddWithValue("$error", error ?? string.Empty);
+        command.Parameters.AddWithValue("$updated", DateTimeOffset.Now.ToString("O"));
+        command.Parameters.AddWithValue("$id", id);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlySet<int>> GetClaimedExcelRowsAsync(
+        string targetKey,
+        long? excludeId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = new HashSet<int>();
+        if (string.IsNullOrWhiteSpace(targetKey)) return result;
+
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT excel_row FROM invoice_applications WHERE excel_target_key=$targetKey AND excel_row IS NOT NULL AND ($excludeId IS NULL OR id <> $excludeId);";
+        command.Parameters.AddWithValue("$targetKey", targetKey);
+        command.Parameters.AddWithValue("$excludeId", (object?)excludeId ?? DBNull.Value);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) result.Add(reader.GetInt32(0));
+        return result;
+    }
+
+    public Task<IReadOnlyList<InvoiceApplication>> GetLegacyExcelAssignmentsAsync(CancellationToken cancellationToken = default)
+        => GetLegacyExcelAssignmentsAsync(null, cancellationToken);
+
+    public async Task<IReadOnlyList<InvoiceApplication>> GetLegacyExcelAssignmentsAsync(
+        InvoiceSource? source,
+        CancellationToken cancellationToken = default)
+    {
+        var result = new List<InvoiceApplication>();
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT * FROM invoice_applications WHERE excel_row IS NOT NULL AND COALESCE(excel_target_key, '') = '' AND ($source IS NULL OR source = $source) ORDER BY id;";
+        object sourceParameter = source.HasValue ? (int)source.Value : DBNull.Value;
+        command.Parameters.AddWithValue("$source", sourceParameter);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) result.Add(Map(reader));
+        return result;
+    }
+
+    public async Task<IReadOnlyList<InvoiceApplication>> GetExcelAssignmentsAsync(
+        string targetKey,
+        CancellationToken cancellationToken = default)
+    {
+        var result = new List<InvoiceApplication>();
+        if (string.IsNullOrWhiteSpace(targetKey)) return result;
+
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT * FROM invoice_applications WHERE excel_target_key=$targetKey AND excel_row IS NOT NULL ORDER BY id;";
+        command.Parameters.AddWithValue("$targetKey", targetKey);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) result.Add(Map(reader));
+        return result;
+    }
+
+    public async Task BackupToAsync(string backupPath, CancellationToken cancellationToken = default)
+    {
+        var directory = Path.GetDirectoryName(backupPath);
+        if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
+
+        await using var source = new SqliteConnection(_connectionString);
+        await source.OpenAsync(cancellationToken);
+        var destinationConnectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = backupPath,
+            Pooling = false,
+            DefaultTimeout = 30
+        }.ToString();
+        await using var destination = new SqliteConnection(destinationConnectionString);
+        await destination.OpenAsync(cancellationToken);
+        source.BackupDatabase(destination);
+    }
+
     public async Task<IReadOnlyList<InvoiceApplication>> GetRecentAsync(int limit, CancellationToken cancellationToken = default)
     {
         var result = new List<InvoiceApplication>();
@@ -396,6 +541,52 @@ public sealed class SqliteInvoiceRepository(string databasePath)
         command.Parameters.AddWithValue("$limit", limit);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken)) result.Add(Map(reader));
+        return result;
+    }
+
+    public async Task<IReadOnlyList<InvoiceSourceStatistics>> GetSourceStatisticsAsync(
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        var counters = InvoiceSourceCatalog.All
+            .ToDictionary(x => x.Source, _ => new int[4]);
+        var today = now.ToLocalTime().Date;
+
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT source, mail_received_at, processing_status, updated_at FROM invoice_applications;";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var source = ParseSource(reader.GetInt32(0));
+            if (!counters.TryGetValue(source, out var counts))
+            {
+                counts = new int[4];
+                counters[source] = counts;
+            }
+
+            if (DateTimeOffset.TryParse(reader.GetString(1), out var receivedAt)
+                && receivedAt.ToLocalTime().Date == today)
+                counts[0]++;
+
+            var status = (ProcessingStatus)reader.GetInt32(2);
+            if (status == ProcessingStatus.Completed
+                && DateTimeOffset.TryParse(reader.GetString(3), out var updatedAt)
+                && updatedAt.ToLocalTime().Date == today)
+                counts[1]++;
+            if (status is ProcessingStatus.PendingExcel or ProcessingStatus.ExcelFailed) counts[2]++;
+            if (status is ProcessingStatus.ParseFailed or ProcessingStatus.MailFailed) counts[3]++;
+        }
+
+        var result = InvoiceSourceCatalog.All
+            .Select(definition =>
+            {
+                var counts = counters[definition.Source];
+                return new InvoiceSourceStatistics(definition.Source, definition.DisplayName, counts[0], counts[1], counts[2], counts[3]);
+            })
+            .ToList();
+        if (counters.TryGetValue(InvoiceSource.Unknown, out var unknown) && unknown.Any(x => x > 0))
+            result.Add(new InvoiceSourceStatistics(InvoiceSource.Unknown, InvoiceSourceCatalog.GetDisplayName(InvoiceSource.Unknown), unknown[0], unknown[1], unknown[2], unknown[3]));
         return result;
     }
 
@@ -443,9 +634,9 @@ public sealed class SqliteInvoiceRepository(string databasePath)
                 company_name=$company, credit_code=$credit, amount=$amount, apply_time=$apply,
                 invoice_type=$type, recipient=$recipient, phone=$phone, address=$address, email=$email, remark=$remark,
                 message_id=$messageId, imap_uid=$uid, uid_validity=$uidValidity, mailbox_name=$mailboxName,
-                mailbox_identity=$mailbox, mail_received_at=$received, mail_subject=$subject, mail_from=$from,
+                mailbox_identity=$mailbox, source=$source, mail_received_at=$received, mail_subject=$subject, mail_from=$from,
                 normalized_body=$body, processing_status=$status, excel_row=$excelRow, updated_at=$updated,
-                error_message=$error, fallback_hash=$hash
+                error_message=$error, fallback_hash=$hash, excel_target_key=$excelTargetKey
             WHERE id=$id;
             """;
         app.Id = id;
@@ -474,12 +665,14 @@ public sealed class SqliteInvoiceRepository(string databasePath)
         command.Parameters.AddWithValue("$uidValidity", (long)app.UidValidity);
         command.Parameters.AddWithValue("$mailboxName", app.MailboxName);
         command.Parameters.AddWithValue("$mailbox", app.MailboxIdentity);
+        command.Parameters.AddWithValue("$source", (int)app.Source);
         command.Parameters.AddWithValue("$received", app.MailReceivedAt.ToString("O"));
         command.Parameters.AddWithValue("$subject", app.MailSubject);
         command.Parameters.AddWithValue("$from", app.MailFrom);
         command.Parameters.AddWithValue("$body", app.NormalizedBody);
         command.Parameters.AddWithValue("$status", (int)app.ProcessingStatus);
         command.Parameters.AddWithValue("$excelRow", (object?)app.ExcelRow ?? DBNull.Value);
+        command.Parameters.AddWithValue("$excelTargetKey", app.ExcelTargetKey);
         command.Parameters.AddWithValue("$created", app.CreatedAt.ToString("O"));
         command.Parameters.AddWithValue("$updated", app.UpdatedAt.ToString("O"));
         command.Parameters.AddWithValue("$error", app.ErrorMessage);
@@ -522,16 +715,23 @@ public sealed class SqliteInvoiceRepository(string databasePath)
         UidValidity = checked((uint)r.GetInt64(r.GetOrdinal("uid_validity"))),
         MailboxName = r.GetString(r.GetOrdinal("mailbox_name")),
         MailboxIdentity = r.GetString(r.GetOrdinal("mailbox_identity")),
+        Source = ParseSource(r.GetInt32(r.GetOrdinal("source"))),
         MailReceivedAt = DateTimeOffset.Parse(r.GetString(r.GetOrdinal("mail_received_at"))),
         MailSubject = r.GetString(r.GetOrdinal("mail_subject")),
         MailFrom = r.GetString(r.GetOrdinal("mail_from")),
         NormalizedBody = r.GetString(r.GetOrdinal("normalized_body")),
         ProcessingStatus = (ProcessingStatus)r.GetInt32(r.GetOrdinal("processing_status")),
         ExcelRow = r.IsDBNull(r.GetOrdinal("excel_row")) ? null : r.GetInt32(r.GetOrdinal("excel_row")),
+        ExcelTargetKey = r.IsDBNull(r.GetOrdinal("excel_target_key")) ? string.Empty : r.GetString(r.GetOrdinal("excel_target_key")),
         CreatedAt = DateTimeOffset.Parse(r.GetString(r.GetOrdinal("created_at"))),
         UpdatedAt = DateTimeOffset.Parse(r.GetString(r.GetOrdinal("updated_at"))),
         ErrorMessage = r.GetString(r.GetOrdinal("error_message"))
     };
+
+    private static InvoiceSource ParseSource(int value)
+        => Enum.IsDefined(typeof(InvoiceSource), value)
+            ? (InvoiceSource)value
+            : InvoiceSource.Unknown;
 
     private static async Task EnsureColumnAsync(SqliteConnection connection, string name, string definition, CancellationToken cancellationToken)
     {
@@ -610,8 +810,28 @@ public sealed class ExcelWriter
         }
     }
 
-    public int ResolveTargetRow(InvoiceApplication application, string filePath, string worksheetName)
+    public Task<int> ResolveTargetRowAsync(
+        InvoiceApplication application,
+        string filePath,
+        string worksheetName,
+        IReadOnlySet<int>? claimedRows = null,
+        CancellationToken cancellationToken = default,
+        InvoiceSource source = InvoiceSource.Sinotrans)
+        => Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ResolveTargetRow(application, filePath, worksheetName, claimedRows, source);
+        }, CancellationToken.None);
+
+    public int ResolveTargetRow(
+        InvoiceApplication application,
+        string filePath,
+        string worksheetName,
+        IReadOnlySet<int>? claimedRows = null,
+        InvoiceSource source = InvoiceSource.Sinotrans)
     {
+        claimedRows ??= EmptyRows;
+        var layout = InvoiceWorksheetLayouts.ForSource(source);
         EnsureWritable(filePath);
         using var workbook = new XLWorkbook(filePath);
         if (!workbook.Worksheets.TryGetWorksheet(worksheetName, out var worksheet))
@@ -620,43 +840,98 @@ public sealed class ExcelWriter
         var lastUsed = worksheet.LastRowUsed()?.RowNumber() ?? 1;
         if (application.ExcelRow is int plannedRow && plannedRow >= 2)
         {
-            if (RowMatches(worksheet, plannedRow, application))
+            if (!claimedRows.Contains(plannedRow) && RowMatches(worksheet, plannedRow, application, layout))
                 return plannedRow;
-            if (RowIsEmpty(worksheet, plannedRow))
+            if (!claimedRows.Contains(plannedRow) && RowIsEmpty(worksheet, plannedRow, layout))
                 return plannedRow;
 
             // A user may have inserted rows above a previously planned row.
-            // Reuse a matching row only when it is unambiguous; otherwise keep
-            // the record pending instead of risking a different application.
-            var existingRow = FindMatchingRow(worksheet, application, Math.Max(lastUsed, plannedRow));
+            // Reuse an unclaimed matching row only after the original row is
+            // no longer usable. The database reservation remains authoritative.
+            var existingRow = FindMatchingRow(worksheet, application, Math.Max(lastUsed, plannedRow), claimedRows, layout);
             if (existingRow is not null) return existingRow.Value;
         }
         else
         {
-            // A new or rebuilt SQLite database may not know about rows that
-            // already exist in the customer's workbook. Reuse an unambiguous
-            // matching row before appending, otherwise a historical scan can
-            // duplicate an entire existing block.
-            var existingRow = FindMatchingRow(worksheet, application, lastUsed);
+            // Existing rows are candidates only when they are not already
+            // claimed by another mail record. This makes identical business
+            // fields safe: each distinct record consumes one row.
+            var existingRow = FindMatchingRow(worksheet, application, lastUsed, claimedRows, layout);
             if (existingRow is not null) return existingRow.Value;
         }
 
-        return Math.Max(lastUsed + 1, 2);
+        return Math.Max(lastUsed + 1, layout.DataStartRow);
     }
+
+    public Task<ExcelWorkbookSnapshot> ReadSnapshotAsync(
+        string filePath,
+        string worksheetName,
+        CancellationToken cancellationToken = default,
+        InvoiceSource source = InvoiceSource.Sinotrans)
+        => Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ReadSnapshot(filePath, worksheetName, source);
+        }, CancellationToken.None);
 
     public async Task RepairExistingRowAsync(
         InvoiceApplication original,
         InvoiceApplication corrected,
         string filePath,
         string worksheetName,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        InvoiceSource source = InvoiceSource.Sinotrans)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (original.ExcelRow is not int targetRow || targetRow < 2)
             throw new InvalidOperationException("历史记录没有可验证的 Excel 行号。");
 
         var ownedLock = await AcquireWriteLockAsync(cancellationToken);
+        try
+        {
+            await Task.Run(() => RepairExistingRowCore(original, corrected, filePath, worksheetName, targetRow, cancellationToken, source), CancellationToken.None).ConfigureAwait(false);
+        }
+        finally
+        {
+            ownedLock?.Dispose();
+        }
+    }
 
+    public async Task<int> WriteAsync(
+        InvoiceApplication application,
+        string filePath,
+        string worksheetName,
+        CancellationToken cancellationToken = default,
+        ExcelWriterLock? writeLock = null,
+        IReadOnlySet<int>? claimedRows = null,
+        InvoiceSource source = InvoiceSource.Sinotrans)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ExcelWriterLock? ownedLock = null;
+        if (writeLock is null) ownedLock = await AcquireWriteLockAsync(cancellationToken);
+        try
+        {
+            return await Task.Run(() => WriteCore(application, filePath, worksheetName, claimedRows, cancellationToken, source), CancellationToken.None).ConfigureAwait(false);
+        }
+        finally
+        {
+            ownedLock?.Dispose();
+        }
+    }
+
+    private static readonly IReadOnlySet<int> EmptyRows = new HashSet<int>();
+
+    private static void RepairExistingRowCore(
+        InvoiceApplication original,
+        InvoiceApplication corrected,
+        string filePath,
+        string worksheetName,
+        int targetRow,
+        CancellationToken cancellationToken,
+        InvoiceSource source)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var layout = InvoiceWorksheetLayouts.ForSource(source);
         var directory = Path.GetDirectoryName(filePath)!;
         var tempPath = Path.Combine(directory, $".{Path.GetFileName(filePath)}.{Guid.NewGuid():N}.tmp.xlsx");
         try
@@ -670,40 +945,45 @@ public sealed class ExcelWriter
                 if (!workbook.Worksheets.TryGetWorksheet(worksheetName, out var worksheet))
                     throw new InvalidOperationException($"工作表不存在：{worksheetName}");
 
-                if (RowMatches(worksheet, targetRow, corrected)) return;
-                if (!RowMatches(worksheet, targetRow, original))
+                if (RowMatches(worksheet, targetRow, corrected, layout)) return;
+                if (!RowMatches(worksheet, targetRow, original, layout))
                     throw new ExcelRowOccupiedException($"Excel 第 {targetRow} 行与历史记录不一致，已停止自动修复以保护人工数据。");
 
-                previousDate = FindPreviousApplicationDate(worksheet, targetRow - 1, corrected.ApplyTime.Year);
+                previousDate = FindPreviousApplicationDate(worksheet, targetRow - 1, corrected.ApplyTime.Year, layout);
             }
 
-            PatchWorksheetXml(tempPath, worksheetName, corrected, targetRow, previousDate);
+            cancellationToken.ThrowIfCancellationRequested();
+            PatchWorksheetXml(tempPath, worksheetName, corrected, targetRow, previousDate, source);
 
             using (var verify = new XLWorkbook(tempPath))
             {
                 var verifySheet = verify.Worksheet(worksheetName);
-                if (!RowMatches(verifySheet, targetRow, corrected))
+                if (!RowMatches(verifySheet, targetRow, corrected, layout))
                     throw new InvalidDataException("Excel 历史记录修复校验失败：目标行内容不一致。");
             }
 
             using (var durable = new FileStream(tempPath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read))
                 durable.Flush(true);
 
+            cancellationToken.ThrowIfCancellationRequested();
             File.Replace(tempPath, filePath, null, true);
         }
         finally
         {
             if (File.Exists(tempPath)) File.Delete(tempPath);
-            ownedLock?.Dispose();
         }
     }
 
-    public async Task<int> WriteAsync(InvoiceApplication application, string filePath, string worksheetName, CancellationToken cancellationToken = default, ExcelWriterLock? writeLock = null)
+    private static int WriteCore(
+        InvoiceApplication application,
+        string filePath,
+        string worksheetName,
+        IReadOnlySet<int>? claimedRows,
+        CancellationToken cancellationToken,
+        InvoiceSource source)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        ExcelWriterLock? ownedLock = null;
-        if (writeLock is null) ownedLock = await AcquireWriteLockAsync(cancellationToken);
-
+        var layout = InvoiceWorksheetLayouts.ForSource(source);
         var directory = Path.GetDirectoryName(filePath)!;
         var tempPath = Path.Combine(directory, $".{Path.GetFileName(filePath)}.{Guid.NewGuid():N}.tmp.xlsx");
 
@@ -712,55 +992,83 @@ public sealed class ExcelWriter
             EnsureWritable(filePath);
             File.Copy(filePath, tempPath, true);
             var row = application.ExcelRow ?? throw new InvalidOperationException("尚未为 Excel 写入预留目标行。");
+            if (claimedRows?.Contains(row) == true)
+                throw new ExcelRowOccupiedException($"Excel 第 {row} 行已由其他申请预留，请重新规划目标行。");
+
             DateTime? previousDate;
             using (var workbook = new XLWorkbook(tempPath))
             {
                 if (!workbook.Worksheets.TryGetWorksheet(worksheetName, out var worksheet))
                     throw new InvalidOperationException($"工作表不存在：{worksheetName}");
 
-                if (RowMatches(worksheet, row, application))
+                if (RowMatches(worksheet, row, application, layout))
                     return row;
 
-                if (!RowIsEmpty(worksheet, row))
-                {
-                    var existingRow = FindMatchingRow(worksheet, application, Math.Max(row, worksheet.LastRowUsed()?.RowNumber() ?? row));
-                    if (existingRow is null)
-                        throw new ExcelRowOccupiedException($"Excel 第 {row} 行已被其他数据占用，请重新规划目标行。");
-                    row = existingRow.Value;
-                    application.ExcelRow = row;
-                }
+                if (!RowIsEmpty(worksheet, row, layout))
+                    throw new ExcelRowOccupiedException($"Excel 第 {row} 行已被其他数据占用，请重新规划目标行。");
 
-                if (RowMatches(worksheet, row, application))
-                    return row;
-
-                previousDate = FindPreviousApplicationDate(worksheet, row - 1, application.ApplyTime.Year);
+                previousDate = FindPreviousApplicationDate(worksheet, row - 1, application.ApplyTime.Year, layout);
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             // ClosedXML is used above only for read-only row planning. Saving the
             // whole workbook through it rewrites styles.xml and can make real
             // customer workbooks trigger Excel's repair dialog. Patch only the
             // target worksheet package part so every other workbook part remains
             // byte-for-byte unchanged.
-            PatchWorksheetXml(tempPath, worksheetName, application, row, previousDate);
+            PatchWorksheetXml(tempPath, worksheetName, application, row, previousDate, source);
 
             using (var verify = new XLWorkbook(tempPath))
             {
                 var verifySheet = verify.Worksheet(worksheetName);
-                if (!RowMatches(verifySheet, row, application))
+                if (!RowMatches(verifySheet, row, application, layout))
                     throw new InvalidDataException("Excel 临时文件校验失败：目标行内容不一致。");
             }
 
             using (var durable = new FileStream(tempPath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read))
                 durable.Flush(true);
 
+            cancellationToken.ThrowIfCancellationRequested();
             File.Replace(tempPath, filePath, null, true);
             return row;
         }
         finally
         {
             if (File.Exists(tempPath)) File.Delete(tempPath);
-            ownedLock?.Dispose();
         }
+    }
+
+    private static ExcelWorkbookSnapshot ReadSnapshot(string filePath, string worksheetName, InvoiceSource source)
+    {
+        var layout = InvoiceWorksheetLayouts.ForSource(source);
+        if (!File.Exists(filePath)) throw new FileNotFoundException("Excel 登记表不存在。", filePath);
+        using var workbook = new XLWorkbook(filePath);
+        if (!workbook.Worksheets.TryGetWorksheet(worksheetName, out var worksheet))
+            throw new InvalidOperationException($"工作表不存在：{worksheetName}");
+
+        var lastUsed = worksheet.LastRowUsed()?.RowNumber() ?? 1;
+        var rows = new List<ExcelRowSnapshot>();
+        (int Month, int Day)? currentDate = null;
+        for (var row = layout.DataStartRow; row <= lastUsed; row++)
+        {
+            var dateText = worksheet.Cell(row, layout.DateColumn).GetString().Trim();
+            if (ParseSheetMonthDay(dateText) is { } parsedDate) currentDate = parsedDate;
+
+            var company = worksheet.Cell(row, layout.CompanyColumn).GetString().Trim();
+            var creditCode = worksheet.Cell(row, layout.CreditCodeColumn).GetString().Trim();
+            var amountText = worksheet.Cell(row, layout.AmountColumn).GetString().Trim();
+            var email = worksheet.Cell(row, layout.EmailColumn).GetString().Trim();
+            if (company.Length == 0 && creditCode.Length == 0 && amountText.Length == 0 && email.Length == 0) continue;
+
+            decimal? amount = decimal.TryParse(amountText, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsedAmount)
+                ? parsedAmount
+                : decimal.TryParse(amountText, NumberStyles.Number, CultureInfo.CurrentCulture, out parsedAmount)
+                    ? parsedAmount
+                    : null;
+            rows.Add(new ExcelRowSnapshot(row, currentDate?.Month, currentDate?.Day, company, creditCode, amount, email));
+        }
+
+        return new ExcelWorkbookSnapshot(lastUsed, rows);
     }
 
     private static void EnsureWritable(string filePath)
@@ -782,48 +1090,57 @@ public sealed class ExcelWriter
         }
     }
 
-    private static bool RowIsEmpty(IXLWorksheet worksheet, int row)
+    private static bool RowIsEmpty(IXLWorksheet worksheet, int row, InvoiceWorksheetLayout layout)
     {
-        var lastColumn = Math.Max(8, worksheet.LastColumnUsed()?.ColumnNumber() ?? 8);
+        var lastColumn = Math.Max(layout.MaxColumn, worksheet.LastColumnUsed()?.ColumnNumber() ?? layout.MaxColumn);
         return Enumerable.Range(1, lastColumn).All(column => worksheet.Cell(row, column).IsEmpty());
     }
 
-    private static int? FindMatchingRow(IXLWorksheet worksheet, InvoiceApplication application, int lastRow)
+    private static int? FindMatchingRow(
+        IXLWorksheet worksheet,
+        InvoiceApplication application,
+        int lastRow,
+        IReadOnlySet<int> claimedRows,
+        InvoiceWorksheetLayout layout)
     {
-        int? match = null;
-        for (var row = 2; row <= lastRow; row++)
+        for (var row = layout.DataStartRow; row <= lastRow; row++)
         {
-            if (!RowMatches(worksheet, row, application)) continue;
-            if (match is not null)
-                throw new ExcelRowOccupiedException($"Excel 中存在多个与申请匹配的历史行（第 {match} 行和第 {row} 行），已停止自动追加以避免重复数据。");
-            match = row;
+            if (claimedRows.Contains(row)) continue;
+            if (!RowMatches(worksheet, row, application, layout)) continue;
+            // Matching business fields are only a historical recovery hint.
+            // Once a row is claimed by another database record it is never
+            // reused for a second mail, even when every visible field is the
+            // same.
+            return row;
         }
-        return match;
+        return null;
     }
 
-    private static bool RowMatches(IXLWorksheet worksheet, int row, InvoiceApplication application)
+    private static bool RowMatches(IXLWorksheet worksheet, int row, InvoiceApplication application, InvoiceWorksheetLayout layout)
     {
-        if (!string.Equals(worksheet.Cell(row, 2).GetString().Trim(), application.CompanyName.Trim(), StringComparison.Ordinal)) return false;
-        if (!string.Equals(worksheet.Cell(row, 3).GetString().Trim(), application.CreditCode.Trim(), StringComparison.Ordinal)) return false;
-        if (!decimal.TryParse(worksheet.Cell(row, 4).GetString(), out var amount) || amount != application.Amount) return false;
-        if (!string.Equals(worksheet.Cell(row, 6).GetString().Trim(), application.Email.Trim(), StringComparison.OrdinalIgnoreCase)) return false;
-        return ApplicationDateMatches(worksheet, row, application.ApplyTime.Date);
+        if (!string.Equals(worksheet.Cell(row, layout.CompanyColumn).GetString().Trim(), application.CompanyName.Trim(), StringComparison.Ordinal)) return false;
+        if (!string.Equals(worksheet.Cell(row, layout.CreditCodeColumn).GetString().Trim(), application.CreditCode.Trim(), StringComparison.Ordinal)) return false;
+        if (!decimal.TryParse(worksheet.Cell(row, layout.AmountColumn).GetString(), NumberStyles.Number, CultureInfo.InvariantCulture, out var amount)
+            && !decimal.TryParse(worksheet.Cell(row, layout.AmountColumn).GetString(), NumberStyles.Number, CultureInfo.CurrentCulture, out amount)) return false;
+        if (amount != application.Amount) return false;
+        if (!string.Equals(worksheet.Cell(row, layout.EmailColumn).GetString().Trim(), application.Email.Trim(), StringComparison.OrdinalIgnoreCase)) return false;
+        return ApplicationDateMatches(worksheet, row, application.ApplyTime.Date, layout);
     }
 
-    private static bool ApplicationDateMatches(IXLWorksheet worksheet, int row, DateTime expectedDate)
+    private static bool ApplicationDateMatches(IXLWorksheet worksheet, int row, DateTime expectedDate, InvoiceWorksheetLayout layout)
     {
-        var rowDate = ParseSheetDate(worksheet.Cell(row, 1).GetString(), expectedDate.Year)
-            ?? FindPreviousApplicationDate(worksheet, row - 1, expectedDate.Year);
+        var rowDate = ParseSheetDate(worksheet.Cell(row, layout.DateColumn).GetString(), expectedDate.Year)
+            ?? FindPreviousApplicationDate(worksheet, row - 1, expectedDate.Year, layout);
         // A completely unlabelled legacy block has no date context to compare.
         // Its business fields can still safely identify an existing row.
         return rowDate is null || rowDate.Value.Date == expectedDate;
     }
 
-    private static DateTime? FindPreviousApplicationDate(IXLWorksheet ws, int row, int assumedYear)
+    private static DateTime? FindPreviousApplicationDate(IXLWorksheet ws, int row, int assumedYear, InvoiceWorksheetLayout layout)
     {
-        for (var current = row; current >= 2; current--)
+        for (var current = row; current >= layout.DataStartRow; current--)
         {
-            var date = ParseSheetDate(ws.Cell(current, 1).GetString(), assumedYear);
+            var date = ParseSheetDate(ws.Cell(current, layout.DateColumn).GetString(), assumedYear);
             if (date is not null) return date;
         }
         return null;
@@ -831,15 +1148,30 @@ public sealed class ExcelWriter
 
     private static DateTime? ParseSheetDate(string? text, int assumedYear)
     {
-        if (string.IsNullOrWhiteSpace(text)) return null;
-        var parts = text.Trim().Split(['.', '/'], StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length != 2 || !int.TryParse(parts[0], out var month) || !int.TryParse(parts[1], out var day)) return null;
-        try { return new DateTime(assumedYear, month, day); }
+        var parts = ParseSheetMonthDay(text);
+        if (parts is null) return null;
+        try { return new DateTime(assumedYear, parts.Value.Month, parts.Value.Day); }
         catch (ArgumentOutOfRangeException) { return null; }
     }
 
-    private static void PatchWorksheetXml(string filePath, string worksheetName, InvoiceApplication application, int targetRow, DateTime? previousDate)
+    private static (int Month, int Day)? ParseSheetMonthDay(string? text)
     {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var parts = text.Trim().Split(['.', '/'], StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length != 2 || !int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var month)
+            || !int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var day)) return null;
+        return month is >= 1 and <= 12 && day is >= 1 and <= 31 ? (month, day) : null;
+    }
+
+    private static void PatchWorksheetXml(
+        string filePath,
+        string worksheetName,
+        InvoiceApplication application,
+        int targetRow,
+        DateTime? previousDate,
+        InvoiceSource source)
+    {
+        var layout = InvoiceWorksheetLayouts.ForSource(source);
         using var archive = ZipFile.Open(filePath, ZipArchiveMode.Update);
         var worksheetPath = ResolveWorksheetPath(archive, worksheetName);
         var entry = archive.GetEntry(worksheetPath) ?? throw new InvalidDataException($"工作表 XML 不存在：{worksheetName}");
@@ -858,7 +1190,7 @@ public sealed class ExcelWriter
         if (target is null)
         {
             target = new XElement(spreadsheet + "row", new XAttribute("r", targetRow));
-            CopyRowFormatting(previous, target, spreadsheet, targetRow);
+            CopyRowFormatting(previous, target, spreadsheet, targetRow, layout.MaxColumn);
             var next = rows.FirstOrDefault(x => RowNumber(x) > targetRow);
             if (next is null) sheetData.Add(target);
             else next.AddBeforeSelf(target);
@@ -866,20 +1198,24 @@ public sealed class ExcelWriter
 
         var outputStyles = EnsureOutputStyles(
             archive,
-            GetStyleId(FindCell(target, spreadsheet, 2)) ?? GetStyleId(FindCell(previous, spreadsheet, 2)),
-            GetStyleId(FindCell(target, spreadsheet, 6)) ?? GetStyleId(FindCell(previous, spreadsheet, 6)));
+            GetStyleId(FindCell(target, spreadsheet, layout.CompanyColumn)) ?? GetStyleId(FindCell(previous, spreadsheet, layout.CompanyColumn)),
+            GetStyleId(FindCell(target, spreadsheet, layout.EmailColumn)) ?? GetStyleId(FindCell(previous, spreadsheet, layout.EmailColumn)));
 
         if (previousDate?.Date != application.ApplyTime.Date)
-            SetInlineString(target, spreadsheet, 1, $"{application.ApplyTime.Month}.{application.ApplyTime.Day}", previous, targetRow);
+            SetInlineString(target, spreadsheet, layout.DateColumn, $"{application.ApplyTime.Month}.{application.ApplyTime.Day}", previous, targetRow);
         else
-            ClearCell(target, spreadsheet, 1, previous, targetRow);
+            ClearCell(target, spreadsheet, layout.DateColumn, previous, targetRow);
 
-        SetInlineString(target, spreadsheet, 2, application.CompanyName, previous, targetRow, outputStyles.BoldTextStyleId);
-        SetInlineString(target, spreadsheet, 3, application.CreditCode, previous, targetRow, outputStyles.BoldTextStyleId);
-        SetNumeric(target, spreadsheet, 4, application.Amount, previous, targetRow);
-        SetInlineString(target, spreadsheet, 6, application.Email, previous, targetRow, outputStyles.HyperlinkStyleId);
-        UpsertEmailHyperlink(archive, worksheetPath, root, targetRow, application.Email);
-        ExpandDimension(root, spreadsheet, targetRow, 8);
+        if (layout.SequenceColumn is int sequenceColumn
+            && !HasCellContent(FindCell(target, spreadsheet, sequenceColumn), spreadsheet))
+            SetNumeric(target, spreadsheet, sequenceColumn, FindNextSequence(rows, spreadsheet, sequenceColumn), previous, targetRow);
+
+        SetInlineString(target, spreadsheet, layout.CompanyColumn, application.CompanyName, previous, targetRow, outputStyles.BoldTextStyleId);
+        SetInlineString(target, spreadsheet, layout.CreditCodeColumn, application.CreditCode, previous, targetRow, outputStyles.BoldTextStyleId);
+        SetNumeric(target, spreadsheet, layout.AmountColumn, application.Amount, previous, targetRow);
+        SetInlineString(target, spreadsheet, layout.EmailColumn, application.Email, previous, targetRow, outputStyles.HyperlinkStyleId);
+        UpsertEmailHyperlink(archive, worksheetPath, root, targetRow, layout.EmailColumn, application.Email);
+        ExpandDimension(root, spreadsheet, targetRow, layout.MaxColumn);
 
         entry.Delete();
         var replacement = archive.CreateEntry(worksheetPath, CompressionLevel.Optimal);
@@ -887,13 +1223,13 @@ public sealed class ExcelWriter
         document.Save(output, System.Xml.Linq.SaveOptions.DisableFormatting);
     }
 
-    private static void CopyRowFormatting(XElement? source, XElement target, XNamespace spreadsheet, int targetRow)
+    private static void CopyRowFormatting(XElement? source, XElement target, XNamespace spreadsheet, int targetRow, int maxColumn)
     {
         if (source is null) return;
         foreach (var attribute in source.Attributes().Where(x => x.Name.LocalName is "ht" or "customHeight" or "s" or "customFormat"))
             target.SetAttributeValue(attribute.Name, attribute.Value);
 
-        for (var column = 1; column <= 8; column++)
+        for (var column = 1; column <= maxColumn; column++)
         {
             var sourceCell = FindCell(source, spreadsheet, column);
             if (sourceCell is null) continue;
@@ -1006,12 +1342,12 @@ public sealed class ExcelWriter
             ? styleId
             : null;
 
-    private static void UpsertEmailHyperlink(ZipArchive archive, string worksheetPath, XElement worksheetRoot, int rowNumber, string email)
+    private static void UpsertEmailHyperlink(ZipArchive archive, string worksheetPath, XElement worksheetRoot, int rowNumber, int emailColumn, string email)
     {
         XNamespace spreadsheet = SpreadsheetNamespace;
         XNamespace officeRelationships = OfficeRelationshipsNamespace;
         XNamespace packageRelationships = PackageRelationshipsNamespace;
-        var cellReference = CellReference(6, rowNumber);
+        var cellReference = CellReference(emailColumn, rowNumber);
         var hyperlinks = worksheetRoot.Element(spreadsheet + "hyperlinks");
         if (hyperlinks is null)
         {
@@ -1112,6 +1448,24 @@ public sealed class ExcelWriter
         cell.Element(spreadsheet + "f")?.Remove();
         cell.Element(spreadsheet + "v")?.Remove();
         cell.Element(spreadsheet + "is")?.Remove();
+    }
+
+    private static bool HasCellContent(XElement? cell, XNamespace spreadsheet)
+        => cell?.Element(spreadsheet + "v") is not null
+            || cell?.Element(spreadsheet + "is") is not null
+            || cell?.Element(spreadsheet + "f") is not null;
+
+    private static int FindNextSequence(IEnumerable<XElement> rows, XNamespace spreadsheet, int sequenceColumn)
+    {
+        var maximum = 0;
+        foreach (var row in rows)
+        {
+            var value = FindCell(row, spreadsheet, sequenceColumn)?.Element(spreadsheet + "v")?.Value;
+            if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var sequence))
+                maximum = Math.Max(maximum, sequence);
+        }
+
+        return maximum + 1;
     }
 
     private static void AddCellContent(XElement cell, XNamespace spreadsheet, XElement content)

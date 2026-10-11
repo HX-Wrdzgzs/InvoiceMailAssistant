@@ -7,6 +7,8 @@
 logs/
 credentials/
 settings.json
+ui-layout.json
+backups/
 *.xlsx
 *.xlsm
 *.tmp.xlsx

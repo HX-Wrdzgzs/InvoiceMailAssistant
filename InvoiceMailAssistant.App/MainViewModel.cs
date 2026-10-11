@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
@@ -8,16 +7,18 @@ using System.Windows.Input;
 
 namespace InvoiceMailAssistant.App;
 
-public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
+public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 {
     private readonly string _dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "InvoiceMailAssistant");
     private readonly MailboxService _mailbox = new();
     private readonly ExcelWriter _excel = new();
+    private readonly ExcelAssignmentCoordinator _excelAssignments;
     private readonly InvoiceParser _parser = new();
     private readonly SqliteInvoiceRepository _repository;
     private readonly DpapiCredentialStore _credentials;
     private readonly SemaphoreSlim _checkGate = new(1, 1);
     private readonly CancellationTokenSource _lifetime = new();
+    private readonly object _lifecycleSync = new();
     private readonly string _settingsPath;
     private AppSettings _settings = new();
     private string _password = string.Empty;
@@ -25,10 +26,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private string _connectionText = "未连接";
     private DateTime? _lastChecked;
     private bool _listening = true;
+    private string? _reconciledExcelTargetKey;
+    private bool _reconciliationPending;
+    private Task? _pollingTask;
+    private Task? _stopTask;
     public event PropertyChangedEventHandler? PropertyChanged;
-    public event Action<int>? NewApplicationsFound;
-    public ObservableCollection<InvoiceApplication> Records { get; } = [];
-    public ObservableCollection<InvoiceApplication> PendingRecords { get; } = [];
+    public event Action<IReadOnlyList<InvoiceSourceCount>>? NewApplicationsFound;
+    private IReadOnlyList<InvoiceApplication> _records = Array.Empty<InvoiceApplication>();
+    private IReadOnlyList<InvoiceApplication> _pendingRecords = Array.Empty<InvoiceApplication>();
+    private IReadOnlyList<InvoiceSourceStatistics> _sourceStatistics = InvoiceSourceCatalog.CreateEmptyStatistics();
+    public IReadOnlyList<InvoiceApplication> Records { get => _records; private set { _records = value; OnPropertyChanged(); } }
+    public IReadOnlyList<InvoiceApplication> PendingRecords { get => _pendingRecords; private set { _pendingRecords = value; OnPropertyChanged(); } }
+    public IReadOnlyList<InvoiceSourceStatistics> SourceStatistics { get => _sourceStatistics; private set { _sourceStatistics = value; OnPropertyChanged(); } }
     public ICommand CheckNowCommand { get; }
     public ICommand TestConnectionCommand { get; }
     public ICommand SaveSettingsCommand { get; }
@@ -41,6 +50,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         _settingsPath = Path.Combine(_dataDir, "settings.json");
         _repository = new SqliteInvoiceRepository(Path.Combine(_dataDir, "invoice-mail.db"));
+        _excelAssignments = new ExcelAssignmentCoordinator(_repository, _excel, _dataDir);
         _credentials = new DpapiCredentialStore(Path.Combine(_dataDir, "credentials"));
         CheckNowCommand = new AsyncRelayCommand(() => CheckNowAsync(false));
         TestConnectionCommand = new AsyncRelayCommand(TestConnectionAsync);
@@ -61,6 +71,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public int ImapPort { get => _settings.ImapPort; set { _settings.ImapPort = value; OnPropertyChanged(); } }
     public string ExcelPath { get => _settings.ExcelPath; set { _settings.ExcelPath = value; OnPropertyChanged(); } }
     public string WorksheetName { get => _settings.WorksheetName; set { _settings.WorksheetName = value; OnPropertyChanged(); } }
+    public string YuntianhuaWorksheetName { get => _settings.YuntianhuaWorksheetName; set { _settings.YuntianhuaWorksheetName = value; OnPropertyChanged(); } }
     public int PollSeconds { get => _settings.PollSeconds; set { _settings.PollSeconds = Math.Clamp(value, 30, 300); OnPropertyChanged(); } }
     public bool RunAtStartup { get => _settings.RunAtStartup; set { _settings.RunAtStartup = value; OnPropertyChanged(); } }
     public string StatusText { get => _statusText; private set { _statusText = value; OnPropertyChanged(); } }
@@ -68,10 +79,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public bool Listening { get => _listening; set { _listening = value; OnPropertyChanged(); OnPropertyChanged(nameof(ListeningButtonText)); } }
     public string ListeningButtonText => Listening ? "暂停监听" : "继续监听";
     public string LastCheckedText => _lastChecked is null ? "尚未检查" : _lastChecked.Value.ToString("yyyy-MM-dd HH:mm:ss");
-    public int TodayReceived => Records.Count(x => x.MailReceivedAt.LocalDateTime.Date == DateTime.Today);
-    public int TodayCompleted => Records.Count(x => x.ProcessingStatus == ProcessingStatus.Completed && x.UpdatedAt.LocalDateTime.Date == DateTime.Today);
-    public int PendingCount => Records.Count(x => x.ProcessingStatus is ProcessingStatus.PendingExcel or ProcessingStatus.ExcelFailed);
-    public int FailedCount => Records.Count(x => x.ProcessingStatus is ProcessingStatus.ParseFailed or ProcessingStatus.MailFailed);
+    public int TodayReceived => SourceStatistics.Sum(x => x.TodayReceived);
+    public int TodayCompleted => SourceStatistics.Sum(x => x.TodayCompleted);
+    public int PendingCount => SourceStatistics.Sum(x => x.Pending);
+    public int FailedCount => SourceStatistics.Sum(x => x.Failed);
 
     public async Task InitializeAsync()
     {
@@ -103,11 +114,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
         }
         OnPropertyChanged(string.Empty);
+        var assignmentsReady = await EnsureExcelAssignmentsAsync();
         await RefreshRecordsAsync();
-        await RepairCompletedRepeatedFormRecordsAsync();
-        await RetryPendingAsync();
-        StatusText = "就绪";
-        _ = RunPollingLoopAsync(_lifetime.Token);
+        if (assignmentsReady)
+        {
+            await RepairCompletedRepeatedFormRecordsAsync();
+            await RetryPendingAsync();
+            StatusText = "就绪";
+        }
+        _pollingTask = RunPollingLoopAsync(_lifetime.Token);
     }
 
     private async Task SaveSettingsAsync()
@@ -125,14 +140,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
 
             await _settings.SaveAsync(_settingsPath);
+            _reconciledExcelTargetKey = null;
+            _reconciliationPending = false;
             StartupManager.SetEnabled(_settings.RunAtStartup);
             if (!string.IsNullOrWhiteSpace(previousMailbox) && !string.Equals(previousMailbox, normalizedAccount, StringComparison.OrdinalIgnoreCase))
                 await _credentials.DeleteAsync(previousMailbox, _lifetime.Token);
             if (!string.IsNullOrWhiteSpace(EmailAccount) && !string.IsNullOrWhiteSpace(Password))
                 await _credentials.SaveAsync(EmailAccount, Password);
-            await RepairCompletedRepeatedFormRecordsAsync();
+            var assignmentsReady = await EnsureExcelAssignmentsAsync();
+            if (assignmentsReady)
+                await RepairCompletedRepeatedFormRecordsAsync();
             await RefreshRecordsAsync();
-            StatusText = "设置已保存";
+            if (assignmentsReady) StatusText = "设置已保存";
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -168,18 +187,20 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
 
             if (!automatic) StatusText = "正在检查邮件";
+            if (!await EnsureExcelAssignmentsAsync()) return;
             var password = await ResolvePasswordAsync();
             var monitorFromUtc = monitorFromOverride ?? await EnsureMonitorStartAsync();
             var repairedExisting = await RepairCompletedRepeatedFormRecordsAsync();
             var messages = await _mailbox.FetchCandidateMessagesAsync(EmailAccount, password, ImapHost, ImapPort, monitorFromUtc, 200, _lifetime.Token);
-            var added = 0;
+            var addedBySource = new Dictionary<InvoiceSource, int>();
 
             foreach (var mail in messages)
             {
                 if (!string.IsNullOrWhiteSpace(mail.FetchError))
                 {
                     var failedFetch = CreateFetchFailed(mail, mail.FetchError);
-                    await _repository.TryInsertAsync(failedFetch, CreateFailureHash(mail), _lifetime.Token);
+                    var insertedFailure = await _repository.TryInsertAsync(failedFetch, CreateFailureHash(mail), _lifetime.Token);
+                    if (insertedFailure is not null) IncrementSourceCount(addedBySource, mail.Source);
                     continue;
                 }
 
@@ -188,7 +209,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 {
                     var failed = CreateParseFailed(mail, parsed.Error ?? "邮件解析失败");
                     var failureHash = CreateFailureHash(mail);
-                    await _repository.TryInsertAsync(failed, failureHash, _lifetime.Token);
+                    var insertedFailure = await _repository.TryInsertAsync(failed, failureHash, _lifetime.Token);
+                    if (insertedFailure is not null) IncrementSourceCount(addedBySource, mail.Source);
                     continue;
                 }
 
@@ -200,14 +222,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 app.Id = insertedId.Value;
                 await _repository.UpdateStatusAsync(app.Id, ProcessingStatus.PendingExcel, cancellationToken: _lifetime.Token);
                 await TryWriteExcelAsync(app);
-                added++;
+                IncrementSourceCount(addedBySource, app.Source);
             }
 
             var repaired = await ReparseFailedCoreAsync();
             await RetryPendingCoreAsync();
             _lastChecked = DateTime.Now;
             ConnectionText = $"已连接：{EmailAccount.Trim()}";
-            if (added > 0) NewApplicationsFound?.Invoke(added);
+            var sourceCounts = InvoiceSourceCatalog.CreateCounts(addedBySource);
+            var added = sourceCounts.Sum(x => x.Count);
+            if (added > 0) NewApplicationsFound?.Invoke(sourceCounts);
             if (!automatic || added > 0 || repaired > 0 || repairedExisting > 0
                 || StatusText.StartsWith("检查失败", StringComparison.Ordinal)
                 || StatusText.StartsWith("自动监听异常", StringComparison.Ordinal))
@@ -222,7 +246,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             _checkGate.Release();
             OnPropertyChanged(nameof(LastCheckedText));
-            await RefreshRecordsAsync();
+            try
+            {
+                await RefreshRecordsAsync();
+            }
+            catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+            {
+            }
+            catch (Exception ex)
+            {
+                StatusText = $"记录刷新失败：{ex.Message}";
+            }
         }
     }
 
@@ -269,7 +303,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     original.MailReceivedAt,
                     original.NormalizedBody,
                     original.UidValidity,
-                    original.MailboxName),
+                    original.MailboxName,
+                    Source: original.Source),
                 original.MailboxIdentity);
             if (!parsed.Success || parsed.Application is null) continue;
 
@@ -278,13 +313,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
             corrected.Id = original.Id;
             corrected.ExcelRow = original.ExcelRow;
+            corrected.ExcelTargetKey = original.ExcelTargetKey;
             corrected.CreatedAt = original.CreatedAt;
             try
             {
                 // Repair the existing row only after confirming its A/B/C/D/F
                 // values still match the old database record. This prevents a
                 // manual edit from being mistaken for the stale parser output.
-                await _excel.RepairExistingRowAsync(original, corrected, ExcelPath, WorksheetName, _lifetime.Token);
+                await _excel.RepairExistingRowAsync(original, corrected, ExcelPath, GetWorksheetName(corrected.Source), _lifetime.Token, corrected.Source);
                 await _repository.UpdateParsedAsync(original.Id, corrected, Deduplication.CreateFallbackHash(corrected), _lifetime.Token);
                 await _repository.UpdateStatusAsync(original.Id, ProcessingStatus.Completed, excelRow: corrected.ExcelRow, cancellationToken: _lifetime.Token);
                 repaired++;
@@ -364,13 +400,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 item.MailReceivedAt,
                 item.NormalizedBody,
                 item.UidValidity,
-                item.MailboxName);
+                item.MailboxName,
+                Source: item.Source);
             var parsed = _parser.Parse(mail, item.MailboxIdentity);
             if (!parsed.Success || parsed.Application is null) continue;
 
             var app = parsed.Application;
             app.Id = item.Id;
             app.ExcelRow = item.ExcelRow;
+            app.ExcelTargetKey = item.ExcelTargetKey;
             app.CreatedAt = item.CreatedAt;
             await _repository.UpdateParsedAsync(app.Id, app, Deduplication.CreateFallbackHash(app), _lifetime.Token);
             await TryWriteExcelAsync(app);
@@ -384,48 +422,31 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         try
         {
-            await PlanAndWriteExcelAsync(app);
+            var worksheetName = GetWorksheetName(app.Source);
+            var row = await _excelAssignments.WriteApplicationAsync(app, ExcelPath, worksheetName, _lifetime.Token, app.Source);
+            app.ExcelRow = row;
+            app.ExcelTargetKey = ExcelTargetIdentity.Create(ExcelPath, worksheetName);
+            app.ProcessingStatus = ProcessingStatus.Completed;
+            app.ErrorMessage = string.Empty;
         }
-        catch (ExcelRowOccupiedException)
+        catch (ExcelRowOccupiedException ex)
         {
-            try
-            {
-                // The persisted row is only a recovery hint. If a user filled it
-                // after planning, recompute a safe row before retrying.
-                await PlanAndWriteExcelAsync(app);
-            }
-            catch (ExcelRowOccupiedException ex)
-            {
-                await _repository.UpdateStatusAsync(app.Id, ProcessingStatus.PendingExcel, ex.Message, cancellationToken: _lifetime.Token);
-            }
-            catch (IOException ex)
-            {
-                await _repository.UpdateStatusAsync(app.Id, ProcessingStatus.PendingExcel, ex.Message, cancellationToken: _lifetime.Token);
-            }
-            catch (Exception ex)
-            {
-                await _repository.UpdateStatusAsync(app.Id, ProcessingStatus.ExcelFailed, ex.Message, cancellationToken: _lifetime.Token);
-            }
+            app.ProcessingStatus = ProcessingStatus.PendingExcel;
+            app.ErrorMessage = ex.Message;
+            await _repository.UpdateStatusAsync(app.Id, ProcessingStatus.PendingExcel, ex.Message, cancellationToken: _lifetime.Token);
         }
         catch (IOException ex)
         {
+            app.ProcessingStatus = ProcessingStatus.PendingExcel;
+            app.ErrorMessage = ex.Message;
             await _repository.UpdateStatusAsync(app.Id, ProcessingStatus.PendingExcel, ex.Message, cancellationToken: _lifetime.Token);
         }
         catch (Exception ex)
         {
+            app.ProcessingStatus = ProcessingStatus.ExcelFailed;
+            app.ErrorMessage = ex.Message;
             await _repository.UpdateStatusAsync(app.Id, ProcessingStatus.ExcelFailed, ex.Message, cancellationToken: _lifetime.Token);
         }
-    }
-
-    private async Task PlanAndWriteExcelAsync(InvoiceApplication app)
-    {
-        using var writeLock = await _excel.AcquireWriteLockAsync(_lifetime.Token);
-        var plannedRow = _excel.ResolveTargetRow(app, ExcelPath, WorksheetName);
-        app.ExcelRow = plannedRow;
-        await _repository.UpdateStatusAsync(app.Id, ProcessingStatus.PendingExcel, excelRow: plannedRow, cancellationToken: _lifetime.Token);
-
-        var row = await _excel.WriteAsync(app, ExcelPath, WorksheetName, _lifetime.Token, writeLock);
-        await _repository.UpdateStatusAsync(app.Id, ProcessingStatus.Completed, excelRow: row, cancellationToken: _lifetime.Token);
     }
 
     private async Task RunPollingLoopAsync(CancellationToken cancellationToken)
@@ -453,16 +474,63 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private async Task RefreshRecordsAsync()
     {
         var items = await _repository.GetRecentAsync(200, _lifetime.Token);
-        Records.Clear();
-        foreach (var item in items) Records.Add(item);
         var pending = await _repository.GetPendingExcelAsync(_lifetime.Token);
-        PendingRecords.Clear();
-        foreach (var item in pending) PendingRecords.Add(item);
+        var sourceStatistics = await _repository.GetSourceStatisticsAsync(DateTimeOffset.Now, _lifetime.Token);
+        Records = items;
+        PendingRecords = pending;
+        SourceStatistics = sourceStatistics;
         OnPropertyChanged(nameof(TodayReceived));
         OnPropertyChanged(nameof(TodayCompleted));
         OnPropertyChanged(nameof(PendingCount));
         OnPropertyChanged(nameof(FailedCount));
-        OnPropertyChanged(nameof(PendingRecords));
+    }
+
+    private string GetWorksheetName(InvoiceSource source)
+        => (source == InvoiceSource.Yuntianhua ? _settings.YuntianhuaWorksheetName : _settings.WorksheetName).Trim();
+
+    private async Task<bool> EnsureExcelAssignmentsAsync()
+    {
+        if (string.IsNullOrWhiteSpace(ExcelPath)) return true;
+
+        var targets = InvoiceSourceCatalog.All
+            .Select(definition => (definition.Source, WorksheetName: GetWorksheetName(definition.Source).Trim()))
+            .Where(target => target.WorksheetName.Length > 0)
+            .GroupBy(target => target.WorksheetName, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToArray();
+        var targetSignature = string.Join("|", targets.Select(target => $"{target.Source}:{ExcelTargetIdentity.Create(ExcelPath, target.WorksheetName)}"));
+        if (string.Equals(_reconciledExcelTargetKey, targetSignature, StringComparison.Ordinal) && !_reconciliationPending)
+            return true;
+
+        try
+        {
+            var mappedExistingRows = 0;
+            var writtenRows = 0;
+            foreach (var target in targets)
+            {
+                var result = await _excelAssignments.ReconcileAsync(ExcelPath, target.WorksheetName, _lifetime.Token, target.Source);
+                mappedExistingRows += result.MappedExistingRows;
+                writtenRows += result.WrittenRows;
+                if (result.PendingRows > 0)
+                {
+                    _reconciledExcelTargetKey = targetSignature;
+                    _reconciliationPending = true;
+                    StatusText = $"历史 Excel 核对有 {result.PendingRows} 条等待处理，请关闭占用的登记表后重试";
+                    return false;
+                }
+            }
+
+            _reconciledExcelTargetKey = targetSignature;
+            _reconciliationPending = false;
+            if (mappedExistingRows > 0 || writtenRows > 0)
+                StatusText = $"已自动核对历史 Excel：复用 {mappedExistingRows} 行，补写 {writtenRows} 行";
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            StatusText = $"历史 Excel 核对暂停：{ex.Message}";
+            return false;
+        }
     }
 
     private async Task<DateTimeOffset> EnsureMonitorStartAsync()
@@ -487,6 +555,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         UidValidity = mail.UidValidity,
         MailboxName = mail.MailboxName,
         MailboxIdentity = EmailAccount.Trim().ToLowerInvariant(),
+        Source = mail.Source,
         MailReceivedAt = mail.ReceivedAt,
         MailSubject = mail.Subject,
         MailFrom = mail.FromAddress,
@@ -502,6 +571,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         UidValidity = mail.UidValidity,
         MailboxName = mail.MailboxName,
         MailboxIdentity = EmailAccount.Trim().ToLowerInvariant(),
+        Source = mail.Source,
         MailReceivedAt = mail.ReceivedAt,
         MailSubject = mail.Subject,
         MailFrom = mail.FromAddress,
@@ -512,9 +582,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private static string CreateFailureHash(MailEnvelope mail)
     {
-        var source = $"FAIL|{mail.MailboxName}|{mail.FromAddress}|{mail.Subject}|{mail.ReceivedAt:O}|{InvoiceParser.NormalizeBody(mail.BodyText)}";
+        var source = $"FAIL|{mail.Source}|{mail.MailboxName}|{mail.FromAddress}|{mail.Subject}|{mail.ReceivedAt:O}|{InvoiceParser.NormalizeBody(mail.BodyText)}";
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)));
     }
+
+    private static void IncrementSourceCount(Dictionary<InvoiceSource, int> counts, InvoiceSource source)
+        => counts[source] = counts.TryGetValue(source, out var current) ? current + 1 : 1;
 
     private void OnPropertyChanged([CallerMemberName] string? name = null)
     {
@@ -527,13 +600,32 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     }
 
-    public void Dispose()
+    public Task StopAsync()
+    {
+        lock (_lifecycleSync)
+            return _stopTask ??= StopCoreAsync();
+    }
+
+    private async Task StopCoreAsync()
     {
         _lifetime.Cancel();
-        _mailbox.Dispose();
-        _lifetime.Dispose();
+        if (_pollingTask is not null)
+        {
+            try
+            {
+                await _pollingTask.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+            {
+            }
+        }
+
+        await _mailbox.DisposeAsync().ConfigureAwait(false);
         _checkGate.Dispose();
+        _lifetime.Dispose();
     }
+
+    public ValueTask DisposeAsync() => new(StopAsync());
 }
 
 public sealed class AsyncRelayCommand(Func<Task> execute, Func<bool>? canExecute = null) : ICommand
