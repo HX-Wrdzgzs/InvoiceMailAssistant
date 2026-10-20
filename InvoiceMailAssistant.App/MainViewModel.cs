@@ -361,9 +361,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             return;
         }
 
-        StatusText = $"正在补扫最近 {days} 天邮件";
+        StatusText = $"正在同时补录中外运和云天化最近 {days} 天邮件";
         await CheckNowAsync(false, DateTimeOffset.UtcNow.AddDays(-days));
-        StatusText = $"历史补扫完成：最近 {days} 天";
+        if (StatusText.StartsWith("检查完成", StringComparison.Ordinal))
+            StatusText = $"历史补录完成：中外运和云天化最近 {days} 天";
     }
 
     private async Task ReparseFailedAsync()

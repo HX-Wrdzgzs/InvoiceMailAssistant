@@ -184,6 +184,50 @@ public sealed class MailboxServiceTests
         Assert.DoesNotContain(result, x => x.Uid == 12);
     }
 
+    [Fact]
+    public async Task HistoricalFetchReturnsBothSourcesFromOneCombinedScan()
+    {
+        var monitorFrom = new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
+        var messages = new[]
+        {
+            new MailboxMessage(
+                21,
+                1,
+                "INBOX",
+                monitorFrom.AddDays(3),
+                ["sino-esign@sinotrans.com"],
+                "中外运向您提交了开票申请",
+                "history-sinotrans-message",
+                "公司名称：历史中外运企业"),
+            new MailboxMessage(
+                22,
+                1,
+                "INBOX",
+                monitorFrom.AddDays(7),
+                ["cs@qsign.cn"],
+                "电子签服务平台开票申请",
+                "history-yuntianhua-message",
+                "云天化电子签服务平台向您提交了开票申请\n公司名称：历史云天化企业")
+        };
+        var factory = new FakeMailboxSessionFactory(() => new FakeMailboxSession(messages));
+        using var service = new MailboxService(factory);
+
+        var result = await service.FetchCandidateMessagesAsync(
+            "account@example.com",
+            "password",
+            "imap.example.com",
+            993,
+            monitorFrom,
+            200,
+            CancellationToken.None);
+
+        Assert.Equal(2, result.Count);
+        Assert.Equal(
+            new[] { InvoiceSource.Sinotrans, InvoiceSource.Yuntianhua },
+            result.OrderBy(x => x.Uid).Select(x => x.Source).ToArray());
+        Assert.Equal(1, factory.ConnectCount);
+    }
+
     private static MailboxMessage CreateMessage(uint uid, DateTimeOffset receivedAt)
         => new(uid, 1, "INBOX", receivedAt, ["sino-esign@sinotrans.com"], "中外运向您提交了开票申请", $"message-{uid}", "body");
 

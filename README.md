@@ -90,7 +90,7 @@ Excel 写入使用同目录临时文件，并在校验后替换目标文件，�
 
 首次配置新的邮箱账户时，程序默认从当前时间开始监听，不会自动扫描全部历史邮件。
 
-需要补录旧数据时，可手动补扫最近 2 天。历史补扫继续经过与实时监听相同的 SQLite 去重流程，不会因为重复扫描产生重复记录。
+需要补录旧数据时，可点击“同时补录两类（最近 2 天）”。一次历史补录会在同一个邮箱时间范围内同时查询中外运和云天化邮件，按发件人和邮件特征分类，继续经过与实时监听相同的 SQLite 去重流程，并分别写入 `中外运`、`云天化` 工作表，不会因为重复扫描产生重复记录。
 如果 SQLite 是新建或曾被替换，程序还会在追加前检查现有 Excel 行；多条相同业务字段的历史行会按行号一对一分配，剩余申请才追加到新行，避免把既有表格重复写入。
 
 ## 自动监听与 Windows 集成
@@ -189,7 +189,7 @@ dotnet test .\InvoiceMailAssistant.Tests\InvoiceMailAssistant.Tests.csproj -c Re
 dotnet publish .\InvoiceMailAssistant.App\InvoiceMailAssistant.App.csproj -c Release -p:PublishProfile=win10-ltsc-x64
 ```
 
-发布结果位于 `publish\win10-ltsc-x64\`，需要将整个目录复制到目标机后运行 `InvoiceMailAssistant.App.exe`，不要只复制 EXE。该配置是自包含发布，目标机不需要另外安装 .NET Desktop Runtime；程序数据仍保存在当前用户的 `%LOCALAPPDATA%\InvoiceMailAssistant`，不应放进发布目录或随安装包复制真实业务数据。
+发布结果为 `publish\win10-ltsc-x64\InvoiceMailAssistant.exe`，只需把这一个 EXE 复制到目标机并运行，不需要再携带发布文件夹。该配置是 Windows 10 LTSC x64 自包含单文件发布，目标机不需要另外安装 .NET Desktop Runtime；程序数据仍保存在当前用户的 `%LOCALAPPDATA%\InvoiceMailAssistant`，不应放进发布文件或随安装包复制真实业务数据。
 
 当前代码仍以 .NET 8 为目标。若部署周期超过 .NET 8 的支持期限，应在升级到后续 LTS 版本后重新验证 Windows 10 LTSC、MailKit、SQLite、DPAPI 和真实工作簿兼容性，不应只替换运行时文件。
 
